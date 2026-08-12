@@ -4,7 +4,12 @@ import path from 'path';
 
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 
-import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
+import {
+  clearContainerProgress,
+  clearContainerToolInFlight,
+  setContainerThinkingLine,
+  setContainerToolInFlight,
+} from '../db/connection.js';
 import type { MemorySessionHookRegistration } from '../memory/session-hook.js';
 import { TIMEZONE, formatLocalStamp } from '../timezone.js';
 import { registerProvider } from './provider-registry.js';
@@ -265,6 +270,89 @@ const postToolUseHook: HookCallback = async () => {
 };
 
 /**
+ * Longest thinking summary we keep. The host renders it as one line of a
+ * progress message alongside the tool list, so it has to survive on a phone
+ * screen — `setContainerThinkingLine` enforces a hard 200-char cap, this is
+ * the "readable" budget we aim for before falling back to a word-boundary cut.
+ */
+const THINKING_LINE_TARGET = 120;
+
+/**
+ * A sentence terminator this early is almost always an abbreviation ("e.g.",
+ * "i.e.", "No.") rather than the end of a thought, so we keep scanning.
+ */
+const MIN_SENTENCE_CHARS = 24;
+
+/**
+ * Reduce a thinking block to a single short line for the host progress message.
+ *
+ * Summarized thinking usually arrives as a bolded title line followed by the
+ * body ("**Checking the wiring defaults**\n\nI need to..."). That title is
+ * already exactly the one-line summary we want, so take it verbatim when it's
+ * there — sentence-splitting would otherwise run straight past it (titles carry
+ * no terminating period) and return the first sentence of the body instead.
+ *
+ * Otherwise: flatten, take the first sentence, and fall back to a word-boundary
+ * cut when that sentence is still too long. Returns '' when there is nothing
+ * usable — callers must skip empty strings rather than writing them (an empty
+ * write would leave the previous turn's line in place; see
+ * `setContainerThinkingLine`, which ignores blank input).
+ */
+export function summarizeThinkingText(text: string): string {
+  const title = /^\s*\*\*(.+?)\*\*\s*(?:\n|$)/.exec(text);
+  if (title) return clampToWordBoundary(title[1].replace(/\s+/g, ' ').trim());
+
+  // Collapse newlines first: a thinking block is multi-paragraph and we want a
+  // sentence, not a line.
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+
+  let sentence = flat;
+  const terminators = /[.!?](?=\s|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = terminators.exec(flat)) !== null) {
+    if (m.index + 1 >= MIN_SENTENCE_CHARS) {
+      sentence = flat.slice(0, m.index + 1);
+      break;
+    }
+  }
+  return clampToWordBoundary(sentence);
+}
+
+/** Trim to THINKING_LINE_TARGET without slicing a word in half. */
+function clampToWordBoundary(line: string): string {
+  if (line.length <= THINKING_LINE_TARGET) return line;
+  const cut = line.slice(0, THINKING_LINE_TARGET);
+  const lastSpace = cut.lastIndexOf(' ');
+  // Only honour the word boundary if it isn't so early that we'd emit a stub.
+  const kept = lastSpace > THINKING_LINE_TARGET / 2 ? cut.slice(0, lastSpace) : cut;
+  return kept.trimEnd() + '…';
+}
+
+/**
+ * Pull the newest thinking text out of an SDK `assistant` message.
+ *
+ * The message carries a content-block array; a turn can emit several thinking
+ * blocks interleaved with tool calls, and the LAST one is the agent's most
+ * current state of mind — that's what the progress message should show. Blocks
+ * are read through a structural cast rather than the SDK's block union so a
+ * future SDK content-block shape can't turn this into a type error on a
+ * cosmetic code path.
+ */
+function lastThinkingText(message: unknown): string | null {
+  const content = (message as { message?: { content?: unknown } }).message?.content;
+  if (!Array.isArray(content)) return null;
+  for (let i = content.length - 1; i >= 0; i--) {
+    const block = content[i] as { type?: string; thinking?: unknown };
+    if (block?.type !== 'thinking') continue;
+    // Under `display: 'omitted'` the blocks still arrive but `.thinking` is an
+    // empty string — nothing to show, and an earlier block won't be any better.
+    return typeof block.thinking === 'string' && block.thinking.trim() ? block.thinking : null;
+  }
+  return null;
+}
+
+/**
  * Read a Claude transcript .jsonl, render a markdown summary, and drop it into
  * the agent's `conversations/` folder so context survives a compaction or a
  * session rotation. Best-effort: returns false (and logs) on any failure.
@@ -452,6 +540,16 @@ function transcriptStartMs(transcriptPath: string): number | null {
  */
 const CLAUDE_CODE_AUTO_COMPACT_WINDOW = process.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW || '165000';
 
+/** Reset the progress scratch state. Best-effort, like every other
+ *  container_state write here — never fail a turn over decoration. */
+function clearProgressBestEffort(): void {
+  try {
+    clearContainerProgress();
+  } catch (err) {
+    log(`Failed to clear progress state: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /**
  * Stale-session detection. Matches Claude Code's error text when a
  * resumed session can't be found — missing transcript .jsonl, unknown
@@ -551,6 +649,14 @@ export class ClaudeProvider implements AgentProvider {
         model: this.model,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         effort: this.effort as any,
+        // `display: 'summarized'` is LOAD-BEARING, not decoration. On every
+        // model this install runs (Opus 4.7+ / 4.8 / Opus 5 / Sonnet 5) the
+        // adaptive default is `display: 'omitted'`, and under "omitted" the
+        // thinking blocks STILL ARRIVE on the assistant message — their
+        // `.thinking` field is just an empty string. So dropping this line
+        // doesn't disable a feature loudly; it makes the host's live progress
+        // message silently render blank forever. Leave it.
+        thinking: { type: 'adaptive', display: 'summarized' },
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         settingSources: ['project', 'user', 'local'],
@@ -568,72 +674,113 @@ export class ClaudeProvider implements AgentProvider {
 
     async function* translateEvents(): AsyncGenerator<ProviderEvent> {
       let messageCount = 0;
-      for await (const message of sdkResult) {
-        if (aborted) return;
-        messageCount++;
+      try {
+        for await (const message of sdkResult) {
+          if (aborted) return;
+          messageCount++;
 
-        // Yield activity for every SDK event so the poll loop knows the agent is working
-        yield { type: 'activity' };
-
-        if (message.type === 'system' && message.subtype === 'init') {
-          yield { type: 'init', continuation: message.session_id };
-        } else if (message.type === 'result') {
-          // `result` text exists only on subtype:"success"; error subtypes
-          // (e.g. a non-retryable 403 billing_error) carry their message in
-          // `errors[]` instead. Surface either so the poll-loop can deliver a
-          // billing/quota notice to the user rather than dropping the turn.
-          const m = message as { result?: string; is_error?: boolean; errors?: string[] };
-          const text = m.result ?? (m.errors && m.errors.length > 0 ? m.errors.join('\n') : null);
-          yield { type: 'result', text, isError: m.is_error === true };
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
-          yield { type: 'error', message: 'API retry', retryable: true };
-        } else if (message.type === 'rate_limit_event') {
-          // The SDK emits this "when rate limit info CHANGES" — it is telemetry,
-          // not necessarily an error. `rate_limit_info.status` is usually
-          // 'allowed' (here's your remaining headroom). Treating every one of
-          // these as a terminal quota error logged a spurious rate-limit line
-          // on healthy turns (#3016) — and aborted them outright wherever the
-          // classification is acted on. ONLY 'rejected' is an actual block.
-          //
-          // When it IS rejected the SDK tells us WHY, so we can finally
-          // distinguish the two cases properly instead of guessing:
-          //   errorCode 'credits_required' / overageDisabledReason
-          //   'out_of_credits'  → genuinely out of credits (billing)
-          //   otherwise         → a transient window limit that resets.
-          const info = (message as { rate_limit_info?: SdkRateLimitInfo }).rate_limit_info;
-          const blocked = classifyRateLimitEvent(info);
-          if (!blocked) {
-            // Informational ('allowed' / 'allowed_warning') — never kill the turn.
-            if (info?.status === 'allowed_warning') {
-              log(
-                `rate-limit warning: ${info.rateLimitType ?? 'window'} at ${
-                  info.utilization != null ? `${Math.round(info.utilization * 100)}%` : 'high'
-                } utilization`,
-              );
-            }
-          } else {
-            yield { type: 'error', message: blocked.message, retryable: false, classification: blocked.classification };
-          }
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
-          const meta = (message as { compact_metadata?: { pre_tokens?: number } }).compact_metadata;
-          const detail = meta?.pre_tokens ? ` (${meta.pre_tokens.toLocaleString()} tokens compacted)` : '';
-          // Not a `result`: the poll loop treats result text as the agent's turn
-          // output — a synthetic "Context compacted." result has no <message>
-          // block, so it triggers the "response was not delivered — please
-          // re-send" nudge and the agent duplicates its previous message.
-          // Compaction is bookkeeping: log it, count it as activity only.
-          log(`Context compacted${detail}.`);
+          // Yield activity for every SDK event so the poll loop knows the agent is working
           yield { type: 'activity' };
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
-          const tn = message as { summary?: string };
-          yield { type: 'progress', message: tn.summary || 'Task notification' };
+
+          if (message.type === 'system' && message.subtype === 'init') {
+            yield { type: 'init', continuation: message.session_id };
+          } else if (message.type === 'result') {
+            // `result` text exists only on subtype:"success"; error subtypes
+            // (e.g. a non-retryable 403 billing_error) carry their message in
+            // `errors[]` instead. Surface either so the poll-loop can deliver a
+            // billing/quota notice to the user rather than dropping the turn.
+            const m = message as { result?: string; is_error?: boolean; errors?: string[] };
+            const text = m.result ?? (m.errors && m.errors.length > 0 ? m.errors.join('\n') : null);
+            yield { type: 'result', text, isError: m.is_error === true };
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'api_retry') {
+            yield { type: 'error', message: 'API retry', retryable: true };
+          } else if (message.type === 'rate_limit_event') {
+            // The SDK emits this "when rate limit info CHANGES" — it is telemetry,
+            // not necessarily an error. `rate_limit_info.status` is usually
+            // 'allowed' (here's your remaining headroom). Treating every one of
+            // these as a terminal quota error logged a spurious rate-limit line
+            // on healthy turns (#3016) — and aborted them outright wherever the
+            // classification is acted on. ONLY 'rejected' is an actual block.
+            //
+            // When it IS rejected the SDK tells us WHY, so we can finally
+            // distinguish the two cases properly instead of guessing:
+            //   errorCode 'credits_required' / overageDisabledReason
+            //   'out_of_credits'  → genuinely out of credits (billing)
+            //   otherwise         → a transient window limit that resets.
+            const info = (message as { rate_limit_info?: SdkRateLimitInfo }).rate_limit_info;
+            const blocked = classifyRateLimitEvent(info);
+            if (!blocked) {
+              // Informational ('allowed' / 'allowed_warning') — never kill the turn.
+              if (info?.status === 'allowed_warning') {
+                log(
+                  `rate-limit warning: ${info.rateLimitType ?? 'window'} at ${
+                    info.utilization != null ? `${Math.round(info.utilization * 100)}%` : 'high'
+                  } utilization`,
+                );
+              }
+            } else {
+              yield {
+                type: 'error',
+                message: blocked.message,
+                retryable: false,
+                classification: blocked.classification,
+              };
+            }
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
+            const meta = (message as { compact_metadata?: { pre_tokens?: number } }).compact_metadata;
+            const detail = meta?.pre_tokens ? ` (${meta.pre_tokens.toLocaleString()} tokens compacted)` : '';
+            // Not a `result`: the poll loop treats result text as the agent's turn
+            // output — a synthetic "Context compacted." result has no <message>
+            // block, so it triggers the "response was not delivered — please
+            // re-send" nudge and the agent duplicates its previous message.
+            // Compaction is bookkeeping: log it, count it as activity only.
+            log(`Context compacted${detail}.`);
+            yield { type: 'activity' };
+          } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
+            const tn = message as { summary?: string };
+            yield { type: 'progress', message: tn.summary || 'Task notification' };
+          } else if (message.type === 'assistant') {
+            // Feed the host's live progress message: record the agent's newest
+            // thinking summary in container_state so the host can render it next
+            // to the recent-tool list. Purely cosmetic side channel — it yields
+            // nothing (the `activity` event at the top of the loop already
+            // covered this message) and never throws into the loop, exactly like
+            // the PreToolUse hook's container_state write.
+            const thinking = lastThinkingText(message);
+            if (thinking) {
+              try {
+                setContainerThinkingLine(summarizeThinkingText(thinking));
+              } catch (err) {
+                log(`Failed to record thinking line: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          }
         }
+        log(`Query completed after ${messageCount} SDK messages`);
+      } finally {
+        // A turn is over — drop the progress scratch state so the NEXT turn
+        // starts from an empty tool list and no stale thinking line. In
+        // `finally` rather than after the loop because the turn also ends via
+        // the abort path (`if (aborted) return`) and via an SDK throw, and a
+        // leftover tool list from a crashed turn is exactly what the host
+        // would render on the next one. Best-effort, like every other
+        // container_state write here.
+        clearProgressBestEffort();
       }
-      log(`Query completed after ${messageCount} SDK messages`);
     }
 
     return {
-      push: (msg) => stream.push(msg),
+      push: (msg) => {
+        // A pushed message starts a NEW turn inside the SAME query — the
+        // poll loop feeds follow-ups into the live stream rather than
+        // opening a fresh query. Reset the progress scratch here so turn
+        // N+1 doesn't render turn N's tool list. Clearing at turn START
+        // rather than turn end also avoids blanking the display in the
+        // window between the result event and the host deleting the
+        // message.
+        clearProgressBestEffort();
+        stream.push(msg);
+      },
       end: () => stream.end(),
       events: translateEvents(),
       abort: () => {

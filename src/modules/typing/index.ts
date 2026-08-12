@@ -19,6 +19,7 @@
  */
 import fs from 'fs';
 
+import { log } from '../../log.js';
 import { heartbeatPath } from '../../session-manager.js';
 
 const TYPING_REFRESH_MS = 4000;
@@ -80,10 +81,24 @@ async function triggerTyping(
   threadId: string | null,
   instance?: string,
 ): Promise<void> {
+  // Both failure modes here are otherwise invisible: an unbound adapter
+  // and a missing `setTyping` optional-chain to undefined, and a throwing
+  // adapter call used to be swallowed whole. That combination makes "no
+  // typing indicator" undiagnosable from the logs, so each one says so.
+  if (!adapter) {
+    log.warn('Typing skipped — no delivery adapter bound', { channelType, platformId });
+    return;
+  }
+  if (typeof adapter.setTyping !== 'function') {
+    log.warn('Typing skipped — delivery adapter has no setTyping', { channelType, platformId });
+    return;
+  }
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, instance);
-  } catch {
+    await adapter.setTyping(channelType, platformId, threadId, instance);
+    log.debug('Typing sent', { channelType, platformId, threadId, instance });
+  } catch (err) {
     // Typing is best-effort — don't let it fail delivery or routing.
+    log.warn('setTyping failed', { channelType, platformId, threadId, instance, err });
   }
 }
 

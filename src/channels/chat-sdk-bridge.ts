@@ -17,6 +17,7 @@ import {
   type Adapter,
   type ConcurrencyStrategy,
   type Message as ChatMessage,
+  type RawMessage,
 } from 'chat';
 import { log } from '../log.js';
 import { SqliteStateAdapter } from '../state-sqlite.js';
@@ -39,11 +40,32 @@ interface GatewayAdapter extends Adapter {
 export interface ReplyContext {
   text: string;
   sender: string;
+  /**
+   * The replied-to message was posted by this bot. Set only by platforms whose
+   * raw payload identifies the replied-to author (Telegram's
+   * `reply_to_message.from`); left undefined elsewhere. See
+   * `resolveInboundMention` for what the bridge does with it.
+   */
+  toBot?: boolean;
 }
 
 /** Extract reply context from a platform-specific raw message. Return null if no reply. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ReplyContextExtractor = (raw: Record<string, any>) => ReplyContext | null;
+
+/**
+ * Replying to one of the bot's own messages is addressing the bot, exactly as
+ * an @mention is — so it feeds the same `InboundMessage.isMention` flag that
+ * the router's engage_mode 'mention' evaluates (src/router.ts evaluateEngage).
+ * Without this, a group wiring in 'mention' mode forces users to re-type
+ * @botname on every turn even while replying directly to the bot.
+ *
+ * Only platforms whose extractor sets `toBot` are affected; for everyone else
+ * this is the adapter's own mention flag, unchanged.
+ */
+export function resolveInboundMention(sdkIsMention: boolean, replyTo: ReplyContext | null | undefined): boolean {
+  return sdkIsMention || replyTo?.toBot === true;
+}
 
 export interface ChatSdkBridgeConfig {
   adapter: Adapter;
@@ -61,6 +83,19 @@ export interface ChatSdkBridgeConfig {
   botToken?: string;
   /** Platform-specific reply context extraction. */
   extractReplyContext?: ReplyContextExtractor;
+  /**
+   * Last-chance rewrite of the thread id used for the typing indicator ONLY.
+   * Exists because a platform can require more addressing for a chat action
+   * than it does for a message: Telegram forum supergroups infer the topic on
+   * `sendMessage` but silently drop a `sendChatAction` that omits it, so the
+   * General topic has to be named explicitly. Posting is deliberately not
+   * routed through this — a wrong id there would misdeliver a real message,
+   * whereas the worst case here is a typing bubble in the wrong place.
+   *
+   * Returns the id to actually use; return the input unchanged to opt out.
+   * Rejections are swallowed by the caller, like every other typing failure.
+   */
+  resolveTypingThreadId?: (threadId: string) => string | Promise<string>;
   /**
    * Whether this platform uses threads as the primary conversation unit.
    * See `ChannelAdapter.supportsThreads`. Declared by the calling channel
@@ -214,11 +249,15 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       serialized.attachments = enriched;
     }
 
-    // Extract reply context via platform-specific hook
+    // Extract reply context via platform-specific hook. A reply aimed at the
+    // bot counts as addressing it, so it can promote isMention (never demote —
+    // an @mention stays a mention whatever it replies to).
+    let mention = isMention;
     if (config.extractReplyContext && message.raw) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const replyTo = config.extractReplyContext(message.raw as Record<string, any>);
       if (replyTo) serialized.replyTo = replyTo;
+      mention = resolveInboundMention(mention, replyTo);
     }
 
     // Project chat-sdk's nested author into the flat sender fields the router
@@ -240,7 +279,7 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       kind: 'chat-sdk',
       content: serialized,
       timestamp: message.metadata.dateSent.toISOString(),
-      isMention,
+      isMention: mention,
       isGroup,
     };
   }
@@ -446,22 +485,43 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
       if (content.operation === 'edit' && content.messageId) {
         const terminalCard = content.terminalCard as Partial<TerminalApprovalCard> | undefined;
+        // editMessage resolves to the resulting platform message — return its
+        // id, exactly as the post paths below do. Returning nothing stored
+        // platform_message_id = NULL on the outbound row, which left an edited
+        // message un-re-editable (a caller that edits the same message on a
+        // cadence has no id to target on the second pass).
+        let edited: RawMessage<unknown> | undefined;
         if (
           terminalCard &&
           typeof terminalCard.title === 'string' &&
           typeof terminalCard.question === 'string' &&
           typeof terminalCard.resolution === 'string'
         ) {
-          await adapter.editMessage(
+          edited = await adapter.editMessage(
             tid,
             content.messageId as string,
             terminalApprovalMessage(terminalCard as TerminalApprovalCard),
           );
         } else {
-          await adapter.editMessage(tid, content.messageId as string, {
+          edited = await adapter.editMessage(tid, content.messageId as string, {
             markdown: transformText((content.text as string) || (content.markdown as string) || ''),
           });
         }
+        return edited?.id;
+      }
+
+      // Delete a message the bridge posted earlier (transient status posts that
+      // must not survive the real reply). Not every adapter implements
+      // deleteMessage even though the Chat SDK's Adapter interface declares it,
+      // so a missing method degrades to a warn instead of throwing into the
+      // delivery path — the same tolerance native adapters get by simply
+      // ignoring operations they don't recognize (src/channels/cli.ts).
+      if (content.operation === 'delete' && content.messageId) {
+        if (typeof adapter.deleteMessage !== 'function') {
+          log.warn('Adapter does not support deleteMessage — dropping delete', { adapter: adapter.name });
+          return;
+        }
+        await adapter.deleteMessage(tid, content.messageId as string);
         return;
       }
 
@@ -595,7 +655,8 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
     async setTyping(platformId: string, threadId: string | null) {
       const tid = threadId ?? platformId;
-      await adapter.startTyping(tid);
+      const typingTid = config.resolveTypingThreadId ? await config.resolveTypingThreadId(tid) : tid;
+      await adapter.startTyping(typingTid);
     },
 
     async teardown() {

@@ -32,6 +32,7 @@ import { composeGroupClaudeMd } from './claude-md-compose.js';
 import { getAgentGroup } from './db/agent-groups.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
+import { stopProgress } from './modules/progress/index.js';
 import { stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { validateAdditionalMounts } from './modules/mount-security/index.js';
@@ -197,6 +198,11 @@ async function spawnContainer(session: Session): Promise<void> {
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
+    // The container is gone, so no reply is coming for this turn. Retire
+    // the progress message here rather than waiting for the heartbeat to
+    // go stale — this is the deterministic signal, the heartbeat is the
+    // backstop for the paths that don't route through here.
+    void stopProgress(session.id);
     // code null = killed by signal (normal shutdown path), not a boot failure.
     if (code !== 0 && code !== null && stderrTail.length > 0) {
       log.warn('Container exited non-zero', { sessionId: session.id, code, containerName, stderrTail });
@@ -209,6 +215,11 @@ async function spawnContainer(session: Session): Promise<void> {
     activeContainers.delete(session.id);
     markContainerStopped(session.id);
     stopTypingRefresh(session.id);
+    // The container is gone, so no reply is coming for this turn. Retire
+    // the progress message here rather than waiting for the heartbeat to
+    // go stale — this is the deterministic signal, the heartbeat is the
+    // backstop for the paths that don't route through here.
+    void stopProgress(session.id);
     log.error('Container spawn error', { sessionId: session.id, err });
   });
 }

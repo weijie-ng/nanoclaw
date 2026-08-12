@@ -372,8 +372,27 @@ export async function processQuery(
   let pollInFlight = false;
   let endedForCommand = false;
   let corruptionStreak = 0;
+  /**
+   * Is a turn currently running? True from the moment the query opens (the
+   * initial prompt is already in flight) until the `result` event, and again
+   * from each follow-up `query.push`. Gates the interval heartbeat below.
+   */
+  let turnInFlight = true;
   const pollHandle = setInterval(() => {
-    if (done || pollInFlight || endedForCommand) return;
+    if (done) return;
+    // The heartbeat file is the host's ONLY signal that this container is
+    // still working: src/modules/typing, src/modules/progress, and
+    // host-sweep stale detection all read its mtime. Touching it solely on
+    // SDK events (the `for await` loop below) leaves it untouched for the
+    // entire span of a turn that reasons for a while and then answers in
+    // one go — no tool calls, nothing to emit between `init` and `result`.
+    // The host then concludes the agent went idle mid-turn and drops the
+    // typing indicator ~15s in, while the answer is still 30s away.
+    // Touching here as well makes the heartbeat mean "container is working",
+    // which is what every reader already assumes. Gated on turnInFlight so
+    // an idle container between turns still goes stale on schedule.
+    if (turnInFlight) touchHeartbeat();
+    if (pollInFlight || endedForCommand) return;
     pollInFlight = true;
 
     void (async () => {
@@ -441,6 +460,8 @@ export async function processQuery(
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
         taskBlockNudged = false;
+        // A pushed follow-up starts a new turn inside the same query.
+        turnInFlight = true;
         query.push(prompt);
         archivePrompts.push(prompt);
         markCompleted(keptIds);
@@ -497,6 +518,10 @@ export async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        // Turn over — stop the interval heartbeat. The query stays open for
+        // follow-up pushes, but an open query with no running turn is idle,
+        // and the host must be able to see that.
+        turnInFlight = false;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for

@@ -28,6 +28,7 @@ import {
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
+import { startProgress, stopProgress } from './modules/progress/index.js';
 import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
 import { log } from './log.js';
 import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
@@ -538,13 +539,27 @@ async function deliverToAgent(
       effectiveThreadId,
       mg.instance,
     );
+    // Live progress message rides the same wake and the same address.
+    // Self-gating: non-telegram channels are a no-op, and nothing is
+    // sent until the turn has run for several seconds.
+    startProgress(
+      session.id,
+      session.agent_group_id,
+      event.channelType,
+      event.platformId,
+      effectiveThreadId,
+      mg.instance,
+    );
     const freshSession = getSession(session.id);
     if (freshSession) {
       const woke = await wakeContainer(freshSession);
       // wakeContainer never throws — it returns false on transient spawn
       // failure (host-sweep retries). Stop the typing indicator we just
       // started so it doesn't leak; the inbound row stays pending.
-      if (!woke) stopTypingRefresh(freshSession.id);
+      if (!woke) {
+        stopTypingRefresh(freshSession.id);
+        await stopProgress(freshSession.id);
+      }
     }
   }
 }

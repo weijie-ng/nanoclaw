@@ -102,41 +102,100 @@ export function getOutboundDb(): Database {
     }
     // container_state: tracks the current tool in flight (if any) so the host
     // sweep can widen its stuck tolerance when Bash is running with a user-
-    // declared long timeout. Forward-compat for older outbound.db files.
+    // declared long timeout. It also carries the live progress fields the host
+    // renders into the "what am I doing" message. Forward-compat for older
+    // outbound.db files.
     _outbound.exec(`
       CREATE TABLE IF NOT EXISTS container_state (
         id                       INTEGER PRIMARY KEY CHECK (id = 1),
         current_tool             TEXT,
         tool_declared_timeout_ms INTEGER,
         tool_started_at          TEXT,
+        recent_tools             TEXT,
+        thinking_line            TEXT,
         updated_at               TEXT NOT NULL
       );
     `);
+    // recent_tools / thinking_line landed after container_state shipped, so
+    // outbound.db files created by an earlier container have the table but not
+    // the columns. Same ALTER-if-absent idiom as session_state.updated_at above.
+    const containerCols = new Set(
+      (_outbound.prepare("PRAGMA table_info('container_state')").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!containerCols.has('recent_tools')) {
+      _outbound.exec(`ALTER TABLE container_state ADD COLUMN recent_tools TEXT`);
+    }
+    if (!containerCols.has('thinking_line')) {
+      _outbound.exec(`ALTER TABLE container_state ADD COLUMN thinking_line TEXT`);
+    }
   }
   return _outbound;
+}
+
+/** How many tool names the recent_tools ring buffer keeps, most-recent-last. */
+const RECENT_TOOLS_MAX = 5;
+
+/** Longest thinking line we persist — the host renders it on one chat line. */
+const THINKING_LINE_MAX = 200;
+
+/**
+ * Decode recent_tools, tolerating anything that isn't a JSON array of strings.
+ * A malformed value means the previous writer was a different (older or newer)
+ * revision; dropping it is strictly better than throwing inside a tool hook.
+ */
+function parseRecentTools(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((t): t is string => typeof t === 'string');
+  } catch {
+    return [];
+  }
 }
 
 /**
  * Record that a tool is starting. `declaredTimeoutMs` is the tool's own
  * timeout hint when one is available (Bash exposes it in the tool_use input);
  * omit for tools with no declared timeout.
+ *
+ * Also appends `tool` to the recent_tools ring buffer (most-recent-LAST, capped
+ * at RECENT_TOOLS_MAX) which the host renders as the "🔧 Read · Grep · …" line.
+ * That history outlives the individual tool call — only clearContainerProgress()
+ * resets it, at turn boundaries.
  */
 export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number | null): void {
   const now = new Date().toISOString();
-  getOutboundDb()
-    .prepare(
-      `INSERT INTO container_state (id, current_tool, tool_declared_timeout_ms, tool_started_at, updated_at)
-       VALUES (1, ?, ?, ?, ?)
+  const db = getOutboundDb();
+  // The ring buffer is a read-modify-write, so it runs inside a transaction:
+  // the row must never be observed (or overwritten) between the SELECT and the
+  // UPSERT. The container is outbound.db's sole writer and uses this single
+  // connection, so the transaction is all the mutual exclusion needed — there
+  // is no second writer to race with.
+  db.transaction(() => {
+    const row = db.prepare('SELECT recent_tools FROM container_state WHERE id = 1').get() as
+      | { recent_tools: string | null }
+      | undefined;
+    const recent = parseRecentTools(row?.recent_tools);
+    recent.push(tool);
+    db.prepare(
+      `INSERT INTO container_state (id, current_tool, tool_declared_timeout_ms, tool_started_at, recent_tools, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          current_tool = excluded.current_tool,
          tool_declared_timeout_ms = excluded.tool_declared_timeout_ms,
          tool_started_at = excluded.tool_started_at,
+         recent_tools = excluded.recent_tools,
          updated_at = excluded.updated_at`,
-    )
-    .run(tool, declaredTimeoutMs, now, now);
+    ).run(tool, declaredTimeoutMs, now, JSON.stringify(recent.slice(-RECENT_TOOLS_MAX)), now);
+  })();
 }
 
-/** Clear the in-flight tool — called on PostToolUse / PostToolUseFailure. */
+/**
+ * Clear the in-flight tool — called on PostToolUse / PostToolUseFailure.
+ * Deliberately leaves recent_tools and thinking_line alone: those describe the
+ * turn, not the individual call, and the host keeps rendering them between tools.
+ */
 export function clearContainerToolInFlight(): void {
   const now = new Date().toISOString();
   getOutboundDb()
@@ -147,6 +206,48 @@ export function clearContainerToolInFlight(): void {
          current_tool = NULL,
          tool_declared_timeout_ms = NULL,
          tool_started_at = NULL,
+         updated_at = excluded.updated_at`,
+    )
+    .run(now);
+}
+
+/**
+ * Record the one-line summary of what the agent is currently thinking about.
+ * Fed from the SDK's summarized thinking blocks, so the text arrives as prose
+ * with newlines — collapse it to a single line and cap it, because the host
+ * renders it verbatim as one chat line. Empty (or whitespace-only) input is
+ * ignored rather than written: blanking the line mid-turn would make the
+ * progress message flicker for no information gain.
+ */
+export function setContainerThinkingLine(line: string): void {
+  const cleaned = line.replace(/\s+/g, ' ').trim().slice(0, THINKING_LINE_MAX);
+  if (!cleaned) return;
+  const now = new Date().toISOString();
+  getOutboundDb()
+    .prepare(
+      `INSERT INTO container_state (id, thinking_line, updated_at)
+       VALUES (1, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         thinking_line = excluded.thinking_line,
+         updated_at = excluded.updated_at`,
+    )
+    .run(cleaned, now);
+}
+
+/**
+ * Reset the per-turn progress fields — called when a turn ends, so the next
+ * turn doesn't open showing the previous turn's tools and thinking line.
+ * Leaves the tool-in-flight columns alone; those have their own lifecycle.
+ */
+export function clearContainerProgress(): void {
+  const now = new Date().toISOString();
+  getOutboundDb()
+    .prepare(
+      `INSERT INTO container_state (id, recent_tools, thinking_line, updated_at)
+       VALUES (1, NULL, NULL, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         recent_tools = NULL,
+         thinking_line = NULL,
          updated_at = excluded.updated_at`,
     )
     .run(now);
@@ -250,6 +351,8 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       current_tool             TEXT,
       tool_declared_timeout_ms INTEGER,
       tool_started_at          TEXT,
+      recent_tools             TEXT,
+      thinking_line            TEXT,
       updated_at               TEXT NOT NULL
     );
   `);
