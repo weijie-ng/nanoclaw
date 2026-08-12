@@ -1,6 +1,6 @@
 ---
 name: update-skills
-description: Re-apply your installed skills to pull their latest code from upstream.
+description: Re-apply your installed skills to pull their latest code from upstream. Use when updating channels or providers, or when asking whether a re-apply will discard a local fix — it surfaces local edits to skill-owned files before overwriting them.
 ---
 
 # About
@@ -17,6 +17,8 @@ Run `/update-skills` in Claude Code.
 
 **Detection**: reads the channel and provider barrels to list which skills have copied code into your tree, and lists the operational/utility skills present under `.claude/skills/`.
 
+**Local edits**: finds commits of your own touching each skill's files, so the selection can show what a re-apply would discard.
+
 **Selection**: presents the installed skills and lets you pick which to re-apply.
 
 **Re-apply**: invokes each selected skill's own apply (e.g. `/add-slack`), which fetches its latest files. Then validates with build + test.
@@ -28,7 +30,7 @@ Help users pull the latest skill code from upstream by re-applying their install
 
 # Operating principles
 - Never proceed with a dirty working tree.
-- Re-apply each skill through its own idempotent apply step — re-applying overwrites only that skill's code files; credentials, wiring, and DB state are untouched.
+- Re-apply each skill through its own idempotent apply step — re-applying overwrites that skill's code files, local edits to them included (Step 1.5 surfaces those); credentials, wiring, and DB state are untouched.
 - Keep token usage low: detect installed skills with `git` and barrel reads; let each skill's apply do its own fetching.
 
 # Step 0: Preflight
@@ -57,25 +59,24 @@ Fetch the branches that carry skill code:
 
 Build the candidate list from the channels and providers actually wired into the barrels — those are the skills whose copied code can be refreshed from upstream.
 
-# Step 1b: Detect local edits to skill-owned files
+# Step 1.5: Detect local edits to skill-owned files
 
-Re-applying a skill **overwrites its code files from the branch**. Any local edit to those files is lost, silently — the apply reports success either way. A fix made directly in `src/channels/<name>.ts` (a bug fix, an extra platform quirk handled) looks identical to an untouched file until it disappears.
+Re-applying overwrites a skill's code files from the branch, discarding any local edit to them. Detect those edits now so Step 2 can price them into the choice.
 
-For each candidate skill, diff its owned files against the branch copy before offering it:
+Collect each skill's owned paths from its own copy steps — read `.claude/skills/add-<name>/SKILL.md` and take every destination path it writes. A channel owns several: `/add-telegram` writes `src/channels/telegram.ts`, `src/channels/telegram-pairing.ts`, `src/channels/telegram-markdown-sanitize.ts`, their tests, and an append to `setup/index.ts`. A provider spans `src/providers/<name>.ts` and `container/agent-runner/src/providers/<name>.ts`. Some channels also own a container skill under `container/skills/`.
 
-- `git fetch origin channels providers --prune` has already run in Step 0.
-- For a channel: `git diff --stat origin/channels -- src/channels/<name>.ts`
-- For a provider: `git diff --stat origin/providers -- <its files>`
+For each skill, list local commits touching those paths:
 
-If a file differs, do **not** silently include that skill in the re-apply list. Show the user what would be lost:
+- `git log --oneline origin/channels..HEAD -- <the skill's paths>`
+- For a provider, use `origin/providers..HEAD` instead.
 
-- Name the file and the size of the difference.
-- `git diff origin/<branch> -- <path>` if they want to see it.
-- Explain the only durable fix: the change belongs on the branch (upstream via PR, or their own fork of it). Re-applying will discard it; skipping keeps it but leaves the skill on old code.
+Read the range as "on HEAD, absent from the branch". Diffing against the branch tip instead would report every upstream advance as a local edit — that advance is the reason to run this skill at all, so the warning would fire on every skill every time and train the user to skip real updates.
 
-Then let them choose per skill: re-apply and lose the local edit, or skip it.
+Expect one commit per skill with no local edits: the apply that installed it. Judge by commit message; anything beyond the install commit is a local edit.
 
-A local edit is not a reason to refuse the update — it is a reason to make the choice explicit. The skill's promise is to not lose customizations *without the user knowing*, and this step is what makes that true.
+For each skill with local edits, record the commit count and subjects for Step 2. Show the diff on request with `git diff origin/<branch>..HEAD -- <paths>`.
+
+When a skill has local edits, tell the user where the change belongs: on the `channels`/`providers` branch (upstream via PR, or their own fork of it). Re-applying discards it; skipping keeps it and leaves that skill on older code. If the edit needs a hook that trunk doesn't expose, the hook belongs in trunk — `src/channels/chat-sdk-bridge.ts` and its siblings — with the adapter calling into it.
 
 # Step 2: Present results
 
@@ -87,6 +88,7 @@ If installed channel/provider skills are found:
 - Show the list (e.g. `slack`, `discord`, `opencode`).
 - Use AskUserQuestion with `multiSelect: true` to let the user pick which skills to re-apply.
   - One option per installed channel/provider (e.g. "Re-apply Slack (/add-slack)").
+  - Where Step 1.5 found local edits, say so in that option's description — "2 local commits to these files will be discarded" — so the cost is visible at the moment of choosing rather than as a separate gate.
   - Add an option: "Skip — don't update any skills now".
 - If the user selects Skip, stop here.
 
@@ -97,7 +99,7 @@ For each selected skill (process one at a time):
 1. Tell the user which skill is being re-applied.
 2. Invoke the corresponding `/add-<name>` skill using the Skill tool.
    - Its apply runs its own pre-flight, fetches the latest files from upstream (`git fetch origin <branch>` + `git show origin/<branch>:path > path`), overwrites the copied-in code, and installs any pinned dependency.
-   - Re-applying is additive: it refreshes only that skill's own files. The barrel import line is left in place if already present, and `.env` credentials and DB wiring are untouched.
+   - Re-applying is additive across skills but wholesale within one: it refreshes that skill's own files from the branch, overwriting local edits to them (Step 1.5). The barrel import line is left in place if already present, and `.env` credentials and DB wiring are untouched.
 3. If a skill's apply reports a problem (a missing upstream file, a failing dependency install), record it and continue with the remaining skills.
 
 # Step 4: Validation
