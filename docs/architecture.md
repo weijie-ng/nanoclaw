@@ -486,13 +486,23 @@ The central DB session row creation is the serialization point. No provider sess
 
 ### Output Delivery
 
-NanoClaw does not stream tokens to users. The provider's query interface yields complete results, but a result's text is not delivered as-is: the agent-runner parses it for `<message to="name">...</message>` blocks (`dispatchResultText` in poll-loop.ts) and writes one messages_out row per block, addressed to that destination with its thread context resolved per destination. Everything outside a block — including `<internal>...</internal>` — is scratchpad: logged, never sent. A block naming an unknown destination is dropped into the scratchpad log.
+NanoClaw does not stream tokens to users — a reply arrives as one or more complete messages. (A separate ephemeral progress message may show coarse status while a long turn runs; see [Live progress](#live-progress). It never carries reply text.) The provider's query interface yields complete results, but a result's text is not delivered as-is: the agent-runner parses it for `<message to="name">...</message>` blocks (`dispatchResultText` in poll-loop.ts) and writes one messages_out row per block, addressed to that destination with its thread context resolved per destination. Everything outside a block — including `<internal>...</internal>` — is scratchpad: logged, never sent. A block naming an unknown destination is dropped into the scratchpad log.
 
 If a result produced text but no valid block, the agent-runner pushes a one-time `<system>` nudge into the live turn asking the agent to re-wrap its response. The exception is a non-retryable error result (e.g. a billing error) with no envelope, which is delivered as an error notice instead of being dropped as scratchpad. Mid-turn interim updates go out through the `send_message` MCP tool; the final-text envelope parsing is how a turn's reply reaches the user. The host delivers complete messages_out rows to channels.
 
-Message editing is supported as an explicit operation (agent calls an `edit_message` tool), not as a streaming mechanism.
+Message editing is available to the agent as an explicit operation (`edit_message`), never as a way to stream a reply into place. The host also edits on its own account — the progress message below — but that message is deleted when the reply lands and never becomes part of the conversation record.
 
-Typing indicators: host sets typing when a container is active for a session, clears when the container exits or a response appears in messages_out.
+Typing indicators: host sets typing when a container is active for a session, clears when the container exits or a response appears in messages_out. The indicator is re-fired on a short interval because platforms expire it after 5–10s (`src/modules/typing/`), gated on the heartbeat file so it stops when the agent goes idle.
+
+### Live progress
+
+Optional, host-side, and purely decorative: on a turn still running after several seconds, the host posts one throwaway message carrying the agent's current reasoning line, its most recent tool calls, and elapsed time; edits it every few seconds; and deletes it when the real reply is delivered (`src/modules/progress/`).
+
+The container publishes both fields into the single-row `container_state` table in `outbound.db` — not `messages_out`, which would consume agent-facing seq numbers and outlive the turn. The two session DBs therefore remain the sole IO surface, exactly as everywhere else.
+
+Two properties make this safe to have on by default. It self-terminates on the same heartbeat the typing indicator uses, so a container that dies mid-turn cannot leave a message editing itself forever; and it is never load-bearing — every failure path (rate limit, delete failure, an adapter with no `deleteMessage`) degrades to no progress message rather than a failed delivery.
+
+The known gap: the posted message id lives only in host memory, so a host restart landing mid-turn strands that message with no cleanup path.
 
 ### Message Batching
 

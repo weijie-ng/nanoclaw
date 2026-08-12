@@ -57,6 +57,26 @@ Fetch the branches that carry skill code:
 
 Build the candidate list from the channels and providers actually wired into the barrels — those are the skills whose copied code can be refreshed from upstream.
 
+# Step 1b: Detect local edits to skill-owned files
+
+Re-applying a skill **overwrites its code files from the branch**. Any local edit to those files is lost, silently — the apply reports success either way. A fix made directly in `src/channels/<name>.ts` (a bug fix, an extra platform quirk handled) looks identical to an untouched file until it disappears.
+
+For each candidate skill, diff its owned files against the branch copy before offering it:
+
+- `git fetch origin channels providers --prune` has already run in Step 0.
+- For a channel: `git diff --stat origin/channels -- src/channels/<name>.ts`
+- For a provider: `git diff --stat origin/providers -- <its files>`
+
+If a file differs, do **not** silently include that skill in the re-apply list. Show the user what would be lost:
+
+- Name the file and the size of the difference.
+- `git diff origin/<branch> -- <path>` if they want to see it.
+- Explain the only durable fix: the change belongs on the branch (upstream via PR, or their own fork of it). Re-applying will discard it; skipping keeps it but leaves the skill on old code.
+
+Then let them choose per skill: re-apply and lose the local edit, or skip it.
+
+A local edit is not a reason to refuse the update — it is a reason to make the choice explicit. The skill's promise is to not lose customizations *without the user knowing*, and this step is what makes that true.
+
 # Step 2: Present results
 
 If no channel or provider skills are installed:

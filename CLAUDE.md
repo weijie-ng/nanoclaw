@@ -127,6 +127,8 @@ Trunk does not ship any specific channel adapter or non-default agent provider. 
 
 Each `/add-<name>` skill is idempotent: `git fetch origin <branch>` → copy module(s) into the standard paths → append a self-registration import to the relevant barrel → `pnpm install <pkg>@<pinned-version>` → build. Channel skills carry these steps as `nc:` directive fences: setup applies them via the engine (`scripts/skill-apply.ts`), an agent applies the prose — same install either way. See [docs/skill-directives.md](docs/skill-directives.md).
 
+**These files are branch-owned, not trunk-owned.** `src/channels/<name>.ts` and the provider modules are copied in from their branch, so a re-apply (`/add-<name>`, `/update-skills`) overwrites them wholesale. Editing one directly works until the next update and then vanishes with no warning. If a fix belongs in an adapter, put it on the `channels` branch; if the seam it needs doesn't exist, add the seam in trunk (`src/channels/chat-sdk-bridge.ts` and friends) and have the adapter call into it. `/update-skills` diffs these files against the branch before re-applying and asks, but it can only ask when it runs.
+
 **Channel defaults.** Each adapter declares its wiring-time defaults (`ChannelDefaults`: per DM/group context — engage mode/pattern, thread policy, unknown-sender policy — plus mention signaling). Exactly two levels: the adapter declaration, and the per-wiring override chosen at creation — no per-instance DB config table. Undeclared (stale) adapters resolve through a behavior-faithful fallback, so a trunk update alone changes nothing. See [docs/api-details.md](docs/api-details.md#channel-defaults) and `src/channels/channel-defaults.ts`.
 
 ## Self-Modification
