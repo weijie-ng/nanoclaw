@@ -18,21 +18,54 @@
 
 ---
 
+## 关于本 fork
+
+这是 [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw) 的一个 fork，持续跟踪上游 `main`，并在其之上增加了：
+
+- **话题智能体（topic agents）** — 智能体可以在自己所在的聊天旁边新开一个话题，并把一个*新的*智能体放进去，只需一次 `spawn_topic_agent` 调用：话题、智能体组、接线，以及让同一批人能与它对话的访问权限，全部由宿主机一步创建完成。它是为 Telegram 论坛型超级群组写的，但唯一依赖的平台能力是 `adapter.createThread`。详见 [docs/topic-spawn.md](docs/topic-spawn.md)。
+- **实时进度** — 当一轮对话运行数秒仍未结束时，宿主机会发出一条一次性消息，显示智能体当前的推理行、最近的工具调用和已用时间，并在这一轮进行期间不断编辑它，等真正的回复送达时将其删除。它永远不在关键路径上：任何失败路径都只会退化为「没有进度消息」，而不会导致投递失败。详见 [实时进度](docs/architecture.md#live-progress)。
+- **预装 Telegram** — 适配器已包含在本代码树中，无需再运行 `/add-telegram`；并在其之上增加了论坛话题路由、回复机器人即触发，以及输入状态（typing）修复。
+
+本 README 的其余部分来自上游，仅把 clone 地址指向了本 fork。
+
 ## 我为什么创建 NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) 是一个令人印象深刻的项目，但我无法安心使用一个我不了解、却能访问我个人隐私的复杂软件。OpenClaw 有近 50 万行代码、53 个配置文件和 70+ 个依赖项。其安全性是应用级别的（白名单、配对码），而非真正的操作系统级隔离。所有东西都在一个共享内存的 Node 进程中运行。
 
-NanoClaw 用一个您能轻松理解的代码库提供了同样的核心功能：一个进程，少数几个文件。Claude 智能体运行在具有文件系统隔离的独立 Linux 容器中，而不是仅靠权限检查。
+NanoClaw 用一个您能轻松理解的代码库提供了同样的核心功能：一个进程，少数几个文件。智能体运行在具有文件系统隔离的独立 Linux 容器中，而不是仅靠权限检查。
 
 ## 快速开始
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/weijie-ng/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash nanoclaw.sh
 ```
 
-`nanoclaw.sh` 会把您从一台全新机器一直带到一个可以直接发消息的命名智能体。它会在缺失时安装 Node、pnpm 和 Docker，向 OneCLI 注册您的 Anthropic 凭据，构建智能体容器，并配对您的第一个渠道（Telegram、Discord、WhatsApp 或本地 CLI）。如果某一步失败，会自动调用 Claude Code 进行诊断并从中断处继续。
+`nanoclaw.sh` 会把您从一台全新机器一直带到一个可以直接发消息的命名智能体。它会在缺失时安装 Node、pnpm 和 Docker，向 OneCLI 注册您的 Anthropic 凭据，构建智能体容器，并配对您的第一个渠道（iMessage、Telegram、Discord、WhatsApp 或本地 CLI）。如果某一步失败，会自动调用 Claude Code 进行诊断并从中断处继续。
+
+<details>
+<summary><strong>从 NanoClaw v1 迁移？</strong></summary>
+
+在您的 v1 安装旁边全新检出一份 v2，然后在其中运行：
+
+```bash
+git clone https://github.com/weijie-ng/nanoclaw.git nanoclaw-v2
+cd nanoclaw-v2
+bash migrate-v2.sh
+```
+
+`migrate-v2.sh` 会找到您的 v1 安装（同级目录，或 `NANOCLAW_V1_PATH=/path/to/nanoclaw`），把状态迁移进 v2 检出目录，然后 `exec` 进入 Claude Code 完成需要判断的部分（写入 owner、共享记忆迁移、fork 定制的重放）。
+
+请直接运行该脚本，不要在 Claude 会话里运行——确定性的那一半需要交互式提示和真实的 shell I/O 来完成 Node/pnpm 引导、Docker、OneCLI 以及容器构建。
+
+**它会做什么：** 合并 `.env`，用 `registered_groups` 播种 v2 数据库，复制群组文件夹 + 会话数据 + 计划任务，安装您选择的渠道适配器，复制渠道认证状态（包括 WhatsApp 的 Baileys 密钥库——LID 映射现在由 Baileys v7 适配器逐条消息解析，不再迁移），并构建智能体容器。
+
+**它不会做什么：** 切换系统服务。您可以在提示时选择 *"switch to v2"*，或者在测试之后手动切换——您的 v1 安装不会被改动。
+
+有哪些变化见 [docs/v1-to-v2-changes.md](docs/v1-to-v2-changes.md)，开发笔记见 [docs/migration-dev.md](docs/migration-dev.md)。
+
+</details>
 
 ## 设计哲学
 
@@ -55,10 +88,22 @@ bash nanoclaw.sh
 - **多渠道消息** — WhatsApp、Telegram、Discord、Slack、Microsoft Teams、iMessage、Matrix、Google Chat、Webex、Linear、GitHub、WeChat，以及通过 Resend 的邮件。按需通过 `/add-<channel>` 技能安装。可同时运行一个或多个。
 - **灵活的隔离模式** — 可为每个渠道配一个独立智能体以获得完全隐私，也可让一个智能体在多个渠道上共享、统一记忆但会话独立，或者把多个渠道合并到一个共享会话里，让一场对话横跨多个入口。通过 `/manage-channels` 按渠道选择。详见 [docs/isolation-model.md](docs/isolation-model.md)。
 - **每个智能体的独立工作区** — 每个智能体组都有自己的 `CLAUDE.md`、自己的记忆、自己的容器，以及您允许的挂载点。除非您明确接线，否则不会有东西越过边界。
-- **计划任务** — 运行 Claude 的周期性作业，可以给您回发消息。
+- **计划任务** — 由智能体执行的周期性作业，可选配[脚本门控](docs/scheduled-tasks.md)，在没有实际工作时避免唤醒它。
 - **网络访问** — 搜索和抓取网页内容。
-- **容器隔离** — 智能体在 Docker（macOS/Linux/WSL2）中沙箱化运行，可选 [Docker Sandboxes](docs/docker-sandboxes.md) 的微虚拟机隔离，或在 macOS 上选用 Apple Container 作为原生运行时。
+- **容器隔离** — 智能体在 Docker 容器中沙箱化运行（macOS/Linux/WSL2）。
 - **凭据安全** — 智能体不持有原始 API key。出站请求经由 [OneCLI 的 Agent Vault](https://github.com/onecli/onecli)，在请求时注入凭据，并按每个智能体执行策略和速率限制。
+- **智能体模板** — 通过 `ncl groups create --template <ref>` 从可复用的模板包一键生成一个开箱即用的智能体（指令 + MCP 工具 + 技能，不含密钥）。模板从本地 `templates/` 目录加载；您可以手工添加，也可以从[公共模板库](https://github.com/nanocoai/nanoclaw-templates)复制。详见 [docs/templates.md](docs/templates.md)。
+
+## 账号，以及什么会离开您的机器
+
+NanoClaw 没有用户账号。它唯一会上报的是匿名的安装诊断信息，
+`NANOCLAW_NO_DIAGNOSTICS=1` 可以关闭。您的智能体、消息、文件和密钥
+永远不会离开您的机器。
+
+只有一个需要您主动选择的例外：您可以[获取预构建的智能体镜像](docs/hardened-image.md)，
+而不是在本地构建。获取我们提供的镜像需要一个免费账号，因此我们会看到您的邮箱地址
+以及您请求镜像的时间——不包含任何关于您智能体的信息，镜像下发之后也不再有任何信息。
+本地构建不需要账号，也不联系任何服务，并且是默认方式。
 
 ## 使用方法
 
@@ -100,10 +145,7 @@ NanoClaw 不用配置文件。想改就直接告诉 Claude Code：
 
 ### RFS（技能征集）
 
-我们希望看到的技能：
-
-**通信渠道**
-- `/add-signal` — 添加 Signal 作为渠道
+目前没有正在征集的渠道或提供者技能——欢迎通过 issue 提出。
 
 ## 系统要求
 
@@ -118,7 +160,7 @@ NanoClaw 不用配置文件。想改就直接告诉 Claude Code：
 消息应用 → 主机进程（路由器） → inbound.db → 容器（Bun、Claude Agent SDK） → outbound.db → 主机进程（投递） → 消息应用
 ```
 
-单一 Node 主机编排每个会话的智能体容器。当一条消息到来时，主机按实体模型（用户 → 消息组 → 智能体组 → 会话）进行路由，写入该会话的 `inbound.db`，并唤醒容器。容器内部的 agent-runner 轮询 `inbound.db`，调用 Claude，并把响应写入 `outbound.db`。主机轮询 `outbound.db`，通过渠道适配器投递回去。
+单一 Node 主机编排每个会话的智能体容器。当一条消息到来时，主机按实体模型（用户 → 消息组 → 智能体组 → 会话）进行路由，写入该会话的 `inbound.db`，并唤醒容器。容器内部的 agent-runner 轮询 `inbound.db`，运行智能体，并把响应写入 `outbound.db`。主机轮询 `outbound.db`，通过渠道适配器投递回去。
 
 每个会话两个 SQLite 文件，每个文件只有一个写入者——没有跨挂载的锁争用，没有 IPC，没有 stdin 管道。渠道和替代提供者在启动时自注册；主干提供注册表和 Chat SDK 桥接，而适配器本身在每个 fork 里通过技能安装。
 
@@ -141,7 +183,7 @@ NanoClaw 不用配置文件。想改就直接告诉 Claude Code：
 
 **为什么用 Docker？**
 
-Docker 提供跨平台支持（macOS、Linux、Windows via WSL2）和成熟的生态。在 macOS 上，您可以选择通过 `/convert-to-apple-container` 切换到 Apple Container，以获得更轻量的原生运行时。如需更强隔离，[Docker Sandboxes](docs/docker-sandboxes.md) 会把每个容器放到一台微虚拟机里运行。
+Docker 提供跨平台支持（macOS、Linux、Windows via WSL2）和成熟的生态。
 
 **我可以在 Linux 或 Windows 上运行吗？**
 
@@ -174,11 +216,19 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 
 如果某一步失败，`nanoclaw.sh` 会把控制权交给 Claude Code 进行诊断并从中断处继续。如果还是没解决，运行 `claude`，然后 `/debug`。如果 Claude 发现一个可能影响其他用户的问题，请对相关的安装步骤或技能提 PR。
 
+**如何卸载 NanoClaw？**
+
+```bash
+bash nanoclaw.sh --uninstall
+```
+
+每份安装都带有一个按检出目录生成的 id，因此卸载程序只会移除属于这一份副本的东西：后台服务、容器和镜像、应用数据和日志、您智能体的文件，以及这份副本在 OneCLI vault 里的智能体。共享的东西——OneCLI 应用和您的凭据、机器上其它的 NanoClaw 副本——都会保留。它会明确列出找到的内容，并逐个群组请求确认；在您同意之前不会删除任何东西。用 `--dry-run` 可以预览而不做任何改动，用 `--yes` 可以跳过确认。`.env` 会在移除前备份。最后再删掉检出目录本身即可。
+
 **什么样的更改会被接受进代码库？**
 
 进入基础配置的只会是：安全修复、bug 修复、明显的改进。仅此而已。
 
-其他一切（新能力、操作系统兼容、硬件支持、增强）都应作为技能贡献到 `channels` 或 `providers` 分支。
+其他一切（新能力、操作系统兼容、硬件支持、增强）都应作为技能贡献：渠道和提供者代码进入 `channels`/`providers` 注册表分支，其余的作为自包含技能。详见 [docs/customizing.md](docs/customizing.md) 和 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 这样基础系统保持最小化，每位用户都可以定制自己的安装，而不必继承他们不想要的功能。
 
@@ -188,8 +238,10 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 
 ## 更新日志
 
-破坏性变更见 [CHANGELOG.md](CHANGELOG.md)，完整发布历史见文档站的 [full release history](https://docs.nanoclaw.dev/changelog)。
+破坏性变更见 [CHANGELOG.md](CHANGELOG.md)，或查看文档站上的[完整发布历史](https://docs.nanoclaw.dev/changelog)。
 
 ## 许可证
 
 MIT
+
+<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=47894bd5-353b-42fe-bb97-74144e6df0bf" />

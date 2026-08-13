@@ -18,21 +18,31 @@
 
 ---
 
+## 이 포크에 대하여
+
+이것은 [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw)의 포크입니다. 업스트림 `main`을 계속 추적하면서 다음을 추가합니다.
+
+- **토픽 에이전트** — 에이전트가 자신이 있는 채팅 옆에 새 토픽을 열고 그 안에 *새로운* 에이전트를 넣을 수 있습니다. `spawn_topic_agent` 호출 한 번으로 토픽, 에이전트 그룹, 연결(wiring), 그리고 같은 사람들이 그 에이전트와 대화할 수 있게 하는 접근 권한까지 모두 호스트 쪽에서 생성됩니다. Telegram 포럼형 슈퍼그룹을 위해 작성되었지만, 필요한 플랫폼 기능은 `adapter.createThread` 하나뿐입니다. [docs/topic-spawn.md](docs/topic-spawn.md) 참고.
+- **라이브 진행 상황** — 몇 초가 지나도 끝나지 않는 턴에서는 호스트가 일회용 메시지 하나를 보내 에이전트의 현재 추론 줄, 최근 도구 호출, 경과 시간을 표시하고, 턴이 진행되는 동안 계속 편집하다가 실제 응답이 도착하면 삭제합니다. 이 기능이 필수 경로가 되는 일은 없습니다. 모든 실패 경로는 전달 실패가 아니라 진행 메시지를 표시하지 않는 것으로 끝납니다. [라이브 진행 상황](docs/architecture.md#live-progress) 참고.
+- **Telegram 기본 포함** — 어댑터가 이 트리에 들어 있어 `/add-telegram`이 필요 없습니다. 여기에 포럼 토픽 라우팅, 봇에게 답장하면 반응하는 동작, 타이핑 표시 수정이 더해져 있습니다.
+
+이후 내용은 업스트림 README이며, clone URL만 이 포크를 가리키도록 바꿨습니다.
+
 ## NanoClaw를 만든 이유
 
 [OpenClaw](https://github.com/openclaw/openclaw)는 인상적인 프로젝트지만, 제가 이해하지 못하는 복잡한 소프트웨어에 제 삶 전체에 대한 접근 권한을 줬다면 저는 잠을 이루지 못했을 것입니다. OpenClaw는 거의 50만 줄에 달하는 코드, 53개의 설정 파일, 70개 이상의 의존성을 가지고 있습니다. 보안은 진정한 OS 수준의 격리가 아니라 애플리케이션 수준(허용 목록, 페어링 코드)에 의존합니다. 모든 것이 메모리를 공유하는 하나의 Node 프로세스에서 실행됩니다.
 
-NanoClaw는 그와 동일한 핵심 기능을 제공하지만, 이해할 수 있을 만큼 작은 코드베이스로 구현합니다. 하나의 프로세스와 몇 개의 파일뿐입니다. Claude 에이전트는 단순한 권한 검사 뒤가 아니라, 파일시스템이 격리된 각자의 Linux 컨테이너에서 실행됩니다.
+NanoClaw는 그와 동일한 핵심 기능을 제공하지만, 이해할 수 있을 만큼 작은 코드베이스로 구현합니다. 하나의 프로세스와 몇 개의 파일뿐입니다. 에이전트는 단순한 권한 검사 뒤가 아니라, 파일시스템이 격리된 각자의 Linux 컨테이너에서 실행됩니다.
 
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/weijie-ng/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash nanoclaw.sh
 ```
 
-`nanoclaw.sh`는 갓 준비한 머신에서 시작해 메시지를 보낼 수 있는 이름 붙은 에이전트까지 안내합니다. 누락된 경우 Node, pnpm, Docker를 설치하고, Anthropic 자격 증명을 OneCLI에 등록하며, 에이전트 컨테이너를 빌드하고, 첫 채널(Telegram, Discord, WhatsApp 또는 로컬 CLI)을 페어링합니다. 어떤 단계가 실패하면 Claude Code가 자동으로 호출되어 원인을 진단하고 중단된 지점부터 재개합니다.
+`nanoclaw.sh`는 갓 준비한 머신에서 시작해 메시지를 보낼 수 있는 이름 붙은 에이전트까지 안내합니다. 누락된 경우 Node, pnpm, Docker를 설치하고, Anthropic 자격 증명을 OneCLI에 등록하며, 에이전트 컨테이너를 빌드하고, 첫 채널(iMessage, Telegram, Discord, WhatsApp 또는 로컬 CLI)을 페어링합니다. 어떤 단계가 실패하면 Claude Code가 자동으로 호출되어 원인을 진단하고 중단된 지점부터 재개합니다.
 
 <details>
 <summary><strong>NanoClaw v1에서 마이그레이션하시나요?</strong></summary>
@@ -40,7 +50,7 @@ bash nanoclaw.sh
 기존 v1 설치 옆에 새로운 v2 체크아웃을 만들어 실행하세요:
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/weijie-ng/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash migrate-v2.sh
 ```
@@ -49,7 +59,7 @@ bash migrate-v2.sh
 
 이 스크립트는 Claude 세션 내부가 아니라 직접 실행하세요. 결정론적인 부분에서 Node/pnpm 부트스트랩, Docker, OneCLI, 컨테이너 빌드를 위해 대화형 프롬프트와 실제 셸 I/O가 필요합니다.
 
-**무엇을 하는가:** `.env`를 병합하고, `registered_groups`로부터 v2 DB를 시딩하며, 그룹 폴더 + 세션 데이터 + 예약 작업을 복사하고, 선택한 채널 어댑터를 설치하며, 채널 인증 상태(WhatsApp의 Baileys 키스토어 + LID 매핑 포함)를 복사하고, 에이전트 컨테이너를 빌드합니다.
+**무엇을 하는가:** `.env`를 병합하고, `registered_groups`로부터 v2 DB를 시딩하며, 그룹 폴더 + 세션 데이터 + 예약 작업을 복사하고, 선택한 채널 어댑터를 설치하며, 채널 인증 상태(WhatsApp의 Baileys 키스토어 포함 — LID 매핑은 이제 마이그레이션되지 않고 Baileys v7 어댑터가 메시지마다 해석합니다)를 복사하고, 에이전트 컨테이너를 빌드합니다.
 
 **무엇을 하지 않는가:** 시스템 서비스를 전환하지 않습니다. 프롬프트에서 *"switch to v2"*를 선택하거나, 테스트 후 수동으로 전환하세요. 기존 v1 설치는 그대로 유지됩니다.
 
@@ -78,10 +88,23 @@ bash migrate-v2.sh
 - **멀티 채널 메시징** — WhatsApp, Telegram, Discord, Slack, Microsoft Teams, iMessage, Matrix, Google Chat, Webex, Linear, GitHub, WeChat, 그리고 Resend를 통한 이메일. `/add-<channel>` 스킬로 필요할 때 설치합니다. 하나 또는 여러 개를 동시에 실행할 수 있습니다.
 - **유연한 격리** — 완전한 프라이버시를 위해 각 채널을 자체 에이전트에 연결하거나, 대화는 분리하되 메모리는 통합하기 위해 하나의 에이전트를 여러 채널에서 공유하거나, 여러 채널을 하나의 공유 세션으로 묶어 하나의 대화가 여러 채널에 걸쳐 이어지도록 할 수 있습니다. `/manage-channels`로 채널별로 선택하세요. [docs/isolation-model.md](docs/isolation-model.md)를 참고하세요.
 - **에이전트별 작업 공간** — 각 에이전트 그룹은 자체 `CLAUDE.md`, 자체 메모리, 자체 컨테이너, 그리고 여러분이 허용한 마운트만 갖습니다. 직접 연결하지 않는 한 경계를 넘는 것은 아무것도 없습니다.
-- **예약 작업** — Claude를 실행하고 여러분에게 다시 메시지를 보낼 수 있는 반복 작업
+- **예약 작업** — 에이전트가 실행하는 반복 작업. 할 일이 없을 때는 에이전트를 깨우지 않도록 선택적으로 [스크립트 게이트](docs/scheduled-tasks.md)를 걸 수 있습니다
 - **웹 접근** — 웹에서 검색하고 콘텐츠를 가져오기
-- **컨테이너 격리** — 에이전트는 Docker(macOS/Linux/WSL2)에서 샌드박스화되며, 선택적으로 [Docker Sandboxes](docs/docker-sandboxes.md) 마이크로 VM 격리나 macOS 네이티브 런타임인 Apple Container를 사용할 수 있습니다
+- **컨테이너 격리** — 에이전트는 Docker 컨테이너에서 샌드박스화됩니다 (macOS/Linux/WSL2)
 - **자격 증명 보안** — 에이전트는 원시 API 키를 절대 보유하지 않습니다. 아웃바운드 요청은 [OneCLI의 Agent Vault](https://github.com/onecli/onecli)를 통해 라우팅되며, 요청 시점에 자격 증명을 주입하고 에이전트별 정책과 속도 제한을 적용합니다.
+- **에이전트 템플릿** — `ncl groups create --template <ref>`로 재사용 가능한 번들에서 바로 실행 가능한 에이전트(지침 + MCP 도구 + 스킬, 시크릿은 제외)를 찍어냅니다. 템플릿은 로컬 `templates/` 폴더에서 불러옵니다. 직접 채워 넣거나 [공개 라이브러리](https://github.com/nanocoai/nanoclaw-templates)에서 복사하세요. [docs/templates.md](docs/templates.md)를 참고하세요.
+
+## 계정과 머신을 떠나는 정보
+
+NanoClaw에는 사용자 계정이 없습니다. 보고되는 것은 익명의 설치 진단 정보뿐이며,
+`NANOCLAW_NO_DIAGNOSTICS=1`로 끌 수 있습니다. 여러분의 에이전트, 메시지, 파일, 키는
+절대 머신을 떠나지 않습니다.
+
+옵트인 예외가 하나 있습니다. 에이전트 이미지를 로컬에서 빌드하는 대신
+[미리 빌드된 이미지를 받아올](docs/hardened-image.md) 수 있습니다. 저희 이미지를 받으려면
+무료 계정이 필요하므로, 저희는 여러분의 이메일 주소와 이미지를 요청한 시점을 보게 됩니다.
+에이전트에 대한 정보는 전혀 보지 않으며, 이미지가 전달된 뒤에는 아무것도 보지 않습니다.
+로컬 빌드는 계정이 필요 없고 어디에도 연결하지 않으며, 이것이 기본값입니다.
 
 ## 사용법
 
@@ -123,10 +146,7 @@ NanoClaw는 설정 파일을 사용하지 않습니다. 변경하려면 Claude C
 
 ### RFS (Request for Skills)
 
-저희가 보고 싶은 스킬:
-
-**커뮤니케이션 채널**
-- `/add-signal` — Signal을 채널로 추가
+현재 요청 중인 채널·프로바이더 스킬은 없습니다 — 제안은 이슈로 올려주세요.
 
 ## 요구 사항
 
@@ -141,7 +161,7 @@ NanoClaw는 설정 파일을 사용하지 않습니다. 변경하려면 Claude C
 메시징 앱 → 호스트 프로세스(라우터) → inbound.db → 컨테이너(Bun, Claude Agent SDK) → outbound.db → 호스트 프로세스(전송) → 메시징 앱
 ```
 
-하나의 Node 호스트가 세션별 에이전트 컨테이너를 오케스트레이션합니다. 메시지가 도착하면 호스트는 엔티티 모델(사용자 → 메시징 그룹 → 에이전트 그룹 → 세션)을 통해 라우팅하고, 세션의 `inbound.db`에 기록한 뒤 컨테이너를 깨웁니다. 컨테이너 내부의 에이전트 러너는 `inbound.db`를 폴링하고, Claude를 실행하며, 응답을 `outbound.db`에 기록합니다. 호스트는 `outbound.db`를 폴링하여 채널 어댑터를 통해 다시 전송합니다.
+하나의 Node 호스트가 세션별 에이전트 컨테이너를 오케스트레이션합니다. 메시지가 도착하면 호스트는 엔티티 모델(사용자 → 메시징 그룹 → 에이전트 그룹 → 세션)을 통해 라우팅하고, 세션의 `inbound.db`에 기록한 뒤 컨테이너를 깨웁니다. 컨테이너 내부의 에이전트 러너는 `inbound.db`를 폴링하고, 에이전트를 실행하며, 응답을 `outbound.db`에 기록합니다. 호스트는 `outbound.db`를 폴링하여 채널 어댑터를 통해 다시 전송합니다.
 
 세션당 두 개의 SQLite 파일이 있으며 각각 정확히 하나의 작성자만 갖습니다. 교차 마운트 경합이 없고, IPC가 없으며, stdin 파이핑이 없습니다. 채널과 대체 프로바이더는 시작 시 자체 등록됩니다. 트렁크는 레지스트리와 Chat SDK 브리지를 제공하고, 어댑터 자체는 포크별로 스킬을 통해 설치됩니다.
 
@@ -164,7 +184,7 @@ NanoClaw는 설정 파일을 사용하지 않습니다. 변경하려면 Claude C
 
 **왜 Docker인가요?**
 
-Docker는 크로스 플랫폼 지원(macOS, Linux, 그리고 WSL2 경유 Windows)과 성숙한 생태계를 제공합니다. macOS에서는 더 가벼운 네이티브 런타임인 Apple Container도 지원됩니다. 추가 격리를 위해 [Docker Sandboxes](docs/docker-sandboxes.md)는 각 컨테이너를 마이크로 VM 안에서 실행합니다.
+Docker는 크로스 플랫폼 지원(macOS, Linux, 그리고 WSL2 경유 Windows)과 성숙한 생태계를 제공합니다.
 
 **Linux나 Windows에서 실행할 수 있나요?**
 

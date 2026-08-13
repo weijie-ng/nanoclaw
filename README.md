@@ -18,6 +18,16 @@
 
 ---
 
+## About this fork
+
+This is a fork of [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw). It tracks upstream `main` and adds:
+
+- **Topic agents** — an agent can open a new topic beside its own chat and put a *new* agent in it, in one `spawn_topic_agent` call: the topic, the agent group, the wiring, and the access that lets the same humans talk to it are all created host-side. Written for Telegram forum supergroups, but the only platform capability it needs is `adapter.createThread`. See [docs/topic-spawn.md](docs/topic-spawn.md).
+- **Live progress** — on a turn still running after a few seconds, the host posts one throwaway message carrying the agent's current reasoning line, its recent tool calls, and elapsed time, edits it as the turn goes, and deletes it when the real reply lands. It is never load-bearing: every failure path degrades to no progress message rather than a failed delivery. See [Live progress](docs/architecture.md#live-progress).
+- **Telegram, preinstalled** — the adapter ships in this tree, so `/add-telegram` is not needed, plus forum-topic routing, reply-to-bot engagement, and typing fixes on top of it.
+
+The rest of this README is upstream's, with the clone URLs pointed at this fork.
+
 ## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
@@ -27,7 +37,7 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/weijie-ng/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash nanoclaw.sh
 ```
@@ -40,7 +50,7 @@ bash nanoclaw.sh
 Run from a fresh v2 checkout next to your v1 install:
 
 ```bash
-git clone https://github.com/nanocoai/nanoclaw.git nanoclaw-v2
+git clone https://github.com/weijie-ng/nanoclaw.git nanoclaw-v2
 cd nanoclaw-v2
 bash migrate-v2.sh
 ```
