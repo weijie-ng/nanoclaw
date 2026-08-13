@@ -27,6 +27,7 @@ const {
   mockRequestApproval,
   mockNotifyAgent,
   mockGetContainerConfig,
+  mockUpdateContainerConfigScalars,
   mockCreateAgentGroup,
   mockInitGroupFilesystem,
   mockCreateMessagingGroup,
@@ -43,6 +44,7 @@ const {
   mockRequestApproval: vi.fn().mockResolvedValue(undefined),
   mockNotifyAgent: vi.fn(),
   mockGetContainerConfig: vi.fn(),
+  mockUpdateContainerConfigScalars: vi.fn(),
   mockCreateAgentGroup: vi.fn(),
   mockInitGroupFilesystem: vi.fn(),
   mockCreateMessagingGroup: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock('../approvals/index.js', () => ({
 vi.mock('../../db/container-configs.js', () => ({
   getContainerConfig: (...a: unknown[]) => mockGetContainerConfig(...a),
   ensureContainerConfig: () => {},
+  updateContainerConfigScalars: (...a: unknown[]) => mockUpdateContainerConfigScalars(...a),
 }));
 vi.mock('../../db/agent-groups.js', () => ({
   getAgentGroup: (id: string) => ({ id, name: id.toUpperCase(), folder: id, agent_provider: null, created_at: '' }),
@@ -410,6 +413,30 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
       expect.anything(),
       expect.objectContaining({ provider: 'codex' }),
     );
+  });
+
+  it('the child inherits the parent group model', async () => {
+    // On an install whose gateway serves a fixed model list, the parent's model
+    // is the only name known to be reachable — falling back to the provider
+    // default can spawn a child onto a name that 403s on its first turn.
+    mockGetContainerConfig.mockReturnValue({ cli_scope: 'global', model: 'claude-sonnet' });
+
+    await runSpawn({ name: 'Trip planning', brief: 'book flights' });
+
+    expect(mockUpdateContainerConfigScalars).toHaveBeenCalledWith(
+      expect.stringMatching(/^ag-/),
+      expect.objectContaining({ model: 'claude-sonnet' }),
+    );
+  });
+
+  it('leaves the child model unset when the parent has none', async () => {
+    // Red-on-delete: writing the parent's `undefined` would look like a
+    // deliberate pin and could shadow a future default.
+    mockGetContainerConfig.mockReturnValue({ cli_scope: 'global' });
+
+    await runSpawn({ name: 'Trip planning', brief: 'book flights' });
+
+    expect(mockUpdateContainerConfigScalars).not.toHaveBeenCalled();
   });
 
   it('the new topic inherits the parent chat unknown_sender_policy', async () => {

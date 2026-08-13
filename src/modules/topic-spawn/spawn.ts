@@ -28,7 +28,7 @@ import { getChannelAdapterExact } from '../../channels/channel-registry.js';
 import { GROUPS_DIR } from '../../config.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
 import { getDb, hasTable } from '../../db/connection.js';
-import { getContainerConfig } from '../../db/container-configs.js';
+import { getContainerConfig, updateContainerConfigScalars } from '../../db/container-configs.js';
 import {
   createMessagingGroup,
   createMessagingGroupAgent,
@@ -275,8 +275,26 @@ async function performSpawnTopicAgent(
   // Same inheritance rule as the subagent path: the child runs on its
   // parent's EFFECTIVE provider, never the instance-wide default, so it is
   // never spawned on a runtime this install can't reach.
-  const parentProvider = getContainerConfig(sourceGroup.id)?.provider ?? 'claude';
+  const parentConfig = getContainerConfig(sourceGroup.id);
+  const parentProvider = parentConfig?.provider ?? 'claude';
   initGroupFilesystem(newGroup, { instructions: instructions || undefined, provider: parentProvider });
+
+  // Model inheritance, for the same reason as the provider above: an install
+  // whose gateway only serves a fixed model list (a LiteLLM key's `models`
+  // allowlist, say) has no instance-wide notion of "a model that works" — the
+  // only name known to be reachable is the one the parent is already running
+  // on. A child stamped with the parent's model is therefore never spawned
+  // onto a name this install can't reach, and a topic agent that would
+  // otherwise fall back to the provider's own default (often a costlier tier)
+  // inherits the deliberate choice instead.
+  //
+  // Stamped once at spawn, not resolved per read: re-pointing the parent later
+  // leaves existing children where they are, matching how the provider hint
+  // behaves. Left unset when the parent has none, so the provider default still
+  // applies — inheriting `undefined` must not look like a decision.
+  if (parentConfig?.model) {
+    updateContainerConfigScalars(agentGroupId, { model: parentConfig.model });
+  }
 
   // 6. The topic is its own messaging group — a 3-part platform_id on a
   //    non-threaded adapter, which outbound delivery already addresses
