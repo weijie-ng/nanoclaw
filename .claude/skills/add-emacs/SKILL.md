@@ -33,18 +33,25 @@ Otherwise continue. Every step below is safe to re-run.
 
 ### 1. Fetch the channels branch
 
+`channels` lives on the canonical repo, which is not necessarily `origin` — in a
+fork it is usually `upstream`, and in a clone of a fork no remote has it yet.
+`resolve_channels_remote` finds the right one and adds `upstream` if none is
+configured, so resolve it rather than assuming `origin`:
+
 ```bash
-git fetch origin channels
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git fetch "$REMOTE" channels
 ```
 
 ### 2. Copy the adapter and Lisp client
 
 ```bash
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
 mkdir -p emacs
-git show origin/channels:src/channels/emacs.ts                    > src/channels/emacs.ts
-git show origin/channels:src/channels/emacs.test.ts              > src/channels/emacs.test.ts
-git show origin/channels:src/channels/emacs-registration.test.ts > src/channels/emacs-registration.test.ts
-git show origin/channels:emacs/nanoclaw.el                        > emacs/nanoclaw.el
+git show "$REMOTE"/channels:src/channels/emacs.ts                    > src/channels/emacs.ts
+git show "$REMOTE"/channels:src/channels/emacs.test.ts              > src/channels/emacs.test.ts
+git show "$REMOTE"/channels:src/channels/emacs-registration.test.ts > src/channels/emacs-registration.test.ts
+git show "$REMOTE"/channels:emacs/nanoclaw.el                        > emacs/nanoclaw.el
 ```
 
 ### 3. Append the self-registration import

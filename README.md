@@ -26,6 +26,16 @@ This is a fork of [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw). It 
 - **Live progress** — on a turn still running after a few seconds, the host posts one throwaway message carrying the agent's current reasoning line, its recent tool calls, and elapsed time, edits it as the turn goes, and deletes it when the real reply lands. It is never load-bearing: every failure path degrades to no progress message rather than a failed delivery. See [Live progress](docs/architecture.md#live-progress).
 - **Telegram, preinstalled** — the adapter ships in this tree, so `/add-telegram` is not needed, plus forum-topic routing, reply-to-bot engagement, and typing fixes on top of it.
 
+**Staying current with upstream.** This fork adds to [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw), it does not replace it. Add upstream as a remote once, then pull updates whenever you like:
+
+```bash
+git remote add upstream https://github.com/nanocoai/nanoclaw.git
+```
+
+Then run `/update-nanoclaw` in Claude Code to preview and merge what changed. The `/add-<channel>` and `/add-<provider>` skills fetch their adapters from upstream's `channels` and `providers` branches directly, so they are always current — this fork deliberately does not mirror those branches, which would freeze them at whatever they held the day they were copied.
+
+One caveat if you use Telegram: `src/channels/telegram.ts` is owned by upstream's `channels` branch, so re-applying `/add-telegram` or running `/update-skills` overwrites it and silently drops the wiring this fork's forum support hangs from. `src/channels/telegram-forum-wiring.test.ts` goes red when that happens — run it after either command.
+
 The rest of this README is upstream's, with the clone URLs pointed at this fork.
 
 ## Why I Built NanoClaw

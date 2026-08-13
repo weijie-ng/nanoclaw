@@ -26,6 +26,16 @@
 - **实时进度** — 当一轮对话运行数秒仍未结束时，宿主机会发出一条一次性消息，显示智能体当前的推理行、最近的工具调用和已用时间，并在这一轮进行期间不断编辑它，等真正的回复送达时将其删除。它永远不在关键路径上：任何失败路径都只会退化为「没有进度消息」，而不会导致投递失败。详见 [实时进度](docs/architecture.md#live-progress)。
 - **预装 Telegram** — 适配器已包含在本代码树中，无需再运行 `/add-telegram`；并在其之上增加了论坛话题路由、回复机器人即触发，以及输入状态（typing）修复。
 
+**持续跟进上游。** 本 fork 是在 [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw) 之上做加法，而不是取代它。只需添加一次 upstream 远程，之后随时都能拉取更新：
+
+```bash
+git remote add upstream https://github.com/nanocoai/nanoclaw.git
+```
+
+然后在 Claude Code 里运行 `/update-nanoclaw` 预览并合并上游的变化。`/add-<channel>` 和 `/add-<provider>` 技能会直接从上游的 `channels` 和 `providers` 分支拉取适配器，因此它们始终是最新的——本 fork 特意不镜像这两个分支，镜像会把它们冻结在复制那天的状态。
+
+如果您使用 Telegram，有一点需要注意：`src/channels/telegram.ts` 归上游的 `channels` 分支所有，所以重新运行 `/add-telegram` 或 `/update-skills` 会覆盖它，并悄无声息地丢掉本 fork 论坛功能所依赖的接线。发生这种情况时 `src/channels/telegram-forum-wiring.test.ts` 会变红——请在执行上述任一命令后运行它。
+
 本 README 的其余部分来自上游，仅把 clone 地址指向了本 fork。
 
 ## 我为什么创建 NanoClaw

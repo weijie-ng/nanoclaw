@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applySkill, removeSkill, planSkill, fullyApplied, firstFailureHint, referenceProse, stepLabel, type ApplyEvent, type InputMeta } from './skill-apply.js';
+import { execSync } from 'node:child_process';
+import { applySkill, removeSkill, planSkill, fullyApplied, firstFailureHint, referenceProse, stepLabel, defaultResolveRemote, type ApplyEvent, type InputMeta } from './skill-apply.js';
 import { parseDirectives, validate } from './skill-directives.js';
 
 // A synthetic skill exercising the fs handlers for real (no network), plus one
@@ -1494,5 +1495,68 @@ describe('referenceProse (reference-floor slice)', () => {
     expect(res.referenceProse).toContain('## Troubleshooting');
     expect(res.referenceProse).toContain('## Alternatives');
     expect(res.referenceProse).not.toContain('## Apply');
+  });
+});
+
+// Registry-branch remote resolution. Every case below is offline: resolution
+// either matches a remote URL as a string or adds a remote, and the one path
+// that would hit the network (ls-remote against a remote that is neither
+// canonical nor local) is given a local bare repo to talk to instead.
+describe('defaultResolveRemote', () => {
+  let root: string;
+
+  const git = (cmd: string) => execSync(`git ${cmd}`, { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'nc-remote-'));
+    git('init -q');
+    delete process.env.NANOCLAW_CHANNELS_REMOTE;
+  });
+
+  it('honours an explicit override without consulting git', () => {
+    process.env.NANOCLAW_CHANNELS_REMOTE = 'somewhere';
+    expect(defaultResolveRemote('channels', root)).toBe('somewhere');
+    delete process.env.NANOCLAW_CHANNELS_REMOTE;
+  });
+
+  it('picks the remote pointing at the canonical repo, whatever it is named', () => {
+    git('remote add origin https://github.com/someone/their-fork.git');
+    git('remote add nanoclaw https://github.com/nanocoai/nanoclaw.git');
+    expect(defaultResolveRemote('channels', root)).toBe('nanoclaw');
+  });
+
+  it('matches the canonical repo over ssh and without the .git suffix', () => {
+    git('remote add upstream git@github.com:nanocoai/nanoclaw');
+    expect(defaultResolveRemote('providers', root)).toBe('upstream');
+  });
+
+  it('does not mistake a lookalike org for the canonical repo', () => {
+    // `origin` has no branches either, so a false match here would surface as
+    // the wrong remote rather than the upstream fallback.
+    git('remote add origin https://github.com/notnanocoai/nanoclaw.git');
+    expect(defaultResolveRemote('channels', root)).toBe('upstream');
+  });
+
+  it('prefers the canonical repo over a fork that mirrored the branch', () => {
+    // The shadowing case: were `origin` scanned first, a stale mirror would win
+    // every resolution and freeze adapters at whatever it last held.
+    const mirror = mkdtempSync(join(tmpdir(), 'nc-mirror-'));
+    execSync('git init -q --bare --initial-branch=channels', { cwd: mirror });
+    git(`remote add origin ${mirror}`);
+    git('remote add upstream https://github.com/nanocoai/nanoclaw.git');
+    expect(defaultResolveRemote('channels', root)).toBe('upstream');
+    rmSync(mirror, { recursive: true, force: true });
+  });
+
+  it('adds upstream when nothing carries the branch, rather than returning a remote that lacks it', () => {
+    // A clone of a fork: one remote, no registry branches, no upstream. The old
+    // `return origin` fell through to a fetch that could only fail.
+    git('remote add origin https://github.com/someone/their-fork.git');
+    expect(defaultResolveRemote('channels', root)).toBe('upstream');
+    expect(git('remote get-url upstream').trim()).toBe('https://github.com/nanocoai/nanoclaw.git');
+  });
+
+  it('falls back to upstream in a repo with no remotes at all', () => {
+    expect(defaultResolveRemote('channels', root)).toBe('upstream');
   });
 });

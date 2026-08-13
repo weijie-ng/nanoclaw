@@ -37,15 +37,22 @@ Otherwise continue. Every step below is safe to re-run.
 
 ### 1. Fetch the channels branch
 
+`channels` lives on the canonical repo, which is not necessarily `origin` — in a
+fork it is usually `upstream`, and in a clone of a fork no remote has it yet.
+`resolve_channels_remote` finds the right one and adds `upstream` if none is
+configured, so resolve it rather than assuming `origin`:
+
 ```bash
-git fetch origin channels
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git fetch "$REMOTE" channels
 ```
 
 ### 2. Copy the adapter and its registration test
 
 ```bash
-git show origin/channels:src/channels/wechat.ts                 > src/channels/wechat.ts
-git show origin/channels:src/channels/wechat-registration.test.ts > src/channels/wechat-registration.test.ts
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git show "$REMOTE"/channels:src/channels/wechat.ts                 > src/channels/wechat.ts
+git show "$REMOTE"/channels:src/channels/wechat-registration.test.ts > src/channels/wechat-registration.test.ts
 ```
 
 ### 3. Append the self-registration import

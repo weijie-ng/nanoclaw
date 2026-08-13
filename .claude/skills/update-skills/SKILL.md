@@ -5,7 +5,7 @@ description: Re-apply your installed skills to pull their latest code from upstr
 
 # About
 
-Each skill is a self-installing additive unit: its folder under `.claude/skills/<name>/` carries its own apply steps (`SKILL.md`), and channel/provider skills fetch their code files from a long-lived upstream branch (`channels`, `providers`) with `git fetch origin <branch>` + `git show origin/<branch>:path > path`. Every apply is idempotent and safe to re-run.
+Each skill is a self-installing additive unit: its folder under `.claude/skills/<name>/` carries its own apply steps (`SKILL.md`), and channel/provider skills fetch their code files from a long-lived upstream branch (`channels`, `providers`) with `git fetch "$REMOTE" <branch>` + `git show "$REMOTE"/<branch>:path > path`, where `$REMOTE` comes from `resolve_channels_remote` (`setup/lib/channels-remote.sh`) rather than a hardcoded `origin` — the branches live on the canonical repo, which is `upstream` in a fork and absent entirely from a clone of a fork. Every apply is idempotent and safe to re-run.
 
 Updating a skill means **re-running its own apply**. The apply re-fetches the latest files from upstream and overwrites the copied-in code, so newer versions land additively.
 
@@ -44,10 +44,14 @@ If output is non-empty:
 Check remotes:
 - `git remote -v`
 
-If `origin` does not point at a NanoClaw upstream (or you want to verify it has the skill branches), confirm with the user before continuing. The default upstream is `https://github.com/nanocoai/nanoclaw.git`.
+The skill branches live on the canonical repo, which is `origin` only for a direct clone of it — in a fork it is `upstream`, and in a clone of a fork no remote has it yet. Resolve the remote instead of assuming, then fetch the branches that carry skill code:
 
-Fetch the branches that carry skill code:
-- `git fetch origin channels providers --prune`
+```bash
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git fetch "$REMOTE" channels providers --prune
+```
+
+`resolve_channels_remote` picks the remote pointing at the canonical repo, and adds `upstream` (`https://github.com/nanocoai/nanoclaw.git`) if none is configured. If it resolves to something the user does not expect, confirm before continuing.
 
 # Step 1: Detect installed skills
 
@@ -67,8 +71,8 @@ Collect each skill's owned paths from its own copy steps — read `.claude/skill
 
 For each skill, list local commits touching those paths:
 
-- `git log --oneline origin/channels..HEAD -- <the skill's paths>`
-- For a provider, use `origin/providers..HEAD` instead.
+- `git log --oneline "$REMOTE"/channels..HEAD -- <the skill's paths>`
+- For a provider, use `"$REMOTE"/providers..HEAD` instead.
 
 Read the range as "on HEAD, absent from the branch". Diffing against the branch tip instead would report every upstream advance as a local edit — that advance is the reason to run this skill at all, so the warning would fire on every skill every time and train the user to skip real updates.
 
@@ -98,7 +102,7 @@ For each selected skill (process one at a time):
 
 1. Tell the user which skill is being re-applied.
 2. Invoke the corresponding `/add-<name>` skill using the Skill tool.
-   - Its apply runs its own pre-flight, fetches the latest files from upstream (`git fetch origin <branch>` + `git show origin/<branch>:path > path`), overwrites the copied-in code, and installs any pinned dependency.
+   - Its apply runs its own pre-flight, fetches the latest files from upstream (`git fetch "$REMOTE" <branch>` + `git show "$REMOTE"/<branch>:path > path`), overwrites the copied-in code, and installs any pinned dependency.
    - Re-applying is additive across skills but wholesale within one: it refreshes that skill's own files from the branch, overwriting local edits to them (Step 1.5). The barrel import line is left in place if already present, and `.env` credentials and DB wiring are untouched.
 3. If a skill's apply reports a problem (a missing upstream file, a failing dependency install), record it and continue with the remaining skills.
 

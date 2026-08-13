@@ -26,6 +26,16 @@
 - **ライブ進捗** — 数秒たっても終わらないターンでは、ホストが使い捨てのメッセージを1通投稿し、エージェントの現在の推論行、直近のツール呼び出し、経過時間を表示します。ターンの進行に合わせて編集し、本当の返信が届いた時点で削除します。これが不可欠な経路になることはありません。どの失敗経路も、配信失敗ではなく「進捗メッセージなし」に縮退します。[ライブ進捗](docs/architecture.md#live-progress) を参照。
 - **Telegram同梱** — アダプターがこのツリーに含まれているため `/add-telegram` は不要です。さらにフォーラムトピックのルーティング、ボットへの返信による起動、入力中表示の修正を上乗せしています。
 
+**アップストリームへの追随。** このフォークは [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw) を置き換えるものではなく、その上に足しているだけです。upstreamリモートを一度追加すれば、いつでも更新を取り込めます。
+
+```bash
+git remote add upstream https://github.com/nanocoai/nanoclaw.git
+```
+
+あとはClaude Codeで`/update-nanoclaw`を実行すれば、変更点をプレビューしてマージできます。`/add-<channel>`と`/add-<provider>`スキルはアップストリームの`channels`／`providers`ブランチから直接アダプターを取得するため、常に最新です。このフォークは意図的にそれらをミラーしていません。ミラーすると、コピーした日の内容で凍結されてしまうからです。
+
+Telegramを使う場合の注意点が1つあります。`src/channels/telegram.ts`はアップストリームの`channels`ブランチが所有しているため、`/add-telegram`の再適用や`/update-skills`の実行で上書きされ、このフォークのフォーラム機能を支える配線が黙って失われます。そのときは`src/channels/telegram-forum-wiring.test.ts`が赤くなります。どちらのコマンドの後にも実行してください。
+
 以降はアップストリームのREADMEで、cloneのURLだけをこのフォークに向けてあります。
 
 ## NanoClawを作った理由

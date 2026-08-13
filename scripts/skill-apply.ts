@@ -358,9 +358,20 @@ export function referenceProse(md: string): string {
 }
 
 // A hardcoded `origin` breaks forks where the registry branch lives on
-// `upstream`. Generic mirror of channels-remote.sh: explicit override → the
-// first remote that actually has the branch → origin.
-function defaultResolveRemote(branch: string, root: string): string {
+// `upstream`, and falling back to `origin` breaks a clone of a fork outright:
+// that clone has one remote, the fork, which carries neither the branch nor a
+// path to it, so the fetch fails with nothing to suggest the fix. Full mirror
+// of channels-remote.sh, resolving in the same order: explicit override → the
+// remote pointing at the canonical repo → the first remote that actually has
+// the branch → add `upstream` and use that.
+//
+// The canonical match runs BEFORE the has-the-branch scan so a fork that
+// mirrored `channels` cannot shadow upstream: `origin` is scanned first, and
+// a stale mirror would otherwise win every resolution and freeze adapters at
+// whatever the mirror last saw.
+const CANONICAL_REGISTRY_REPO = /[/:](?:nanocoai|qwibitai)\/nanoclaw(?:\.git)?$/;
+
+export function defaultResolveRemote(branch: string, root: string): string {
   const override = process.env.NANOCLAW_CHANNELS_REMOTE;
   if (override) return override;
   const cap = (cmd: string): string => {
@@ -370,10 +381,20 @@ function defaultResolveRemote(branch: string, root: string): string {
       return '';
     }
   };
-  const remotes = cap('git remote').split('\n').map((s) => s.trim()).filter(Boolean);
-  const ordered = remotes.includes('origin') ? ['origin', ...remotes.filter((r) => r !== 'origin')] : remotes;
+  const fetchRemotes = cap('git remote -v')
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts.length >= 3 && parts[2] === '(fetch)')
+    .map((parts) => ({ name: parts[0], url: parts[1] }));
+  for (const { name, url } of fetchRemotes) if (CANONICAL_REGISTRY_REPO.test(url)) return name;
+  const names = fetchRemotes.map((r) => r.name);
+  const ordered = names.includes('origin') ? ['origin', ...names.filter((r) => r !== 'origin')] : names;
   for (const r of ordered) if (cap(`git ls-remote --heads ${r} ${branch}`).trim()) return r;
-  return 'origin';
+  // Nothing carries it. Add the canonical upstream rather than returning a
+  // remote we know lacks the branch, so a clone of a fork installs on the
+  // first try. Silent on failure so the caller surfaces the fetch error.
+  cap('git remote add upstream https://github.com/nanocoai/nanoclaw.git');
+  return 'upstream';
 }
 
 // The prose an agent reads when a step degrades: nearest heading + the

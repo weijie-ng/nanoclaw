@@ -29,8 +29,14 @@ Missing pieces — continue below. All steps are idempotent; re-running is safe.
 
 ### 1. Fetch the providers branch
 
+`providers` lives on the canonical repo, which is not necessarily `origin` — in a
+fork it is usually `upstream`, and in a clone of a fork no remote has it yet.
+`resolve_channels_remote` finds the right one and adds `upstream` if none is
+configured, so resolve it rather than assuming `origin`:
+
 ```bash
-git fetch origin providers
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git fetch "$REMOTE" providers
 ```
 
 ### 2. Copy the OpenCode source files
@@ -38,18 +44,20 @@ git fetch origin providers
 Wholesale copies (owned entirely by this skill — user edits to these files won't survive a re-run, as designed):
 
 ```bash
-git show origin/providers:src/providers/opencode.ts                                     > src/providers/opencode.ts
-git show origin/providers:container/agent-runner/src/providers/opencode.ts              > container/agent-runner/src/providers/opencode.ts
-git show origin/providers:container/agent-runner/src/providers/mcp-to-opencode.ts       > container/agent-runner/src/providers/mcp-to-opencode.ts
-git show origin/providers:container/agent-runner/src/providers/mcp-to-opencode.test.ts  > container/agent-runner/src/providers/mcp-to-opencode.test.ts
-git show origin/providers:container/agent-runner/src/providers/opencode.factory.test.ts > container/agent-runner/src/providers/opencode.factory.test.ts
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git show "$REMOTE"/providers:src/providers/opencode.ts                                     > src/providers/opencode.ts
+git show "$REMOTE"/providers:container/agent-runner/src/providers/opencode.ts              > container/agent-runner/src/providers/opencode.ts
+git show "$REMOTE"/providers:container/agent-runner/src/providers/mcp-to-opencode.ts       > container/agent-runner/src/providers/mcp-to-opencode.ts
+git show "$REMOTE"/providers:container/agent-runner/src/providers/mcp-to-opencode.test.ts  > container/agent-runner/src/providers/mcp-to-opencode.test.ts
+git show "$REMOTE"/providers:container/agent-runner/src/providers/opencode.factory.test.ts > container/agent-runner/src/providers/opencode.factory.test.ts
 ```
 
 Also copy the two barrel-registration guards — one per tree. These import the real provider barrels and assert `opencode` is registered, so they go red the moment a barrel import line is deleted or drifts:
 
 ```bash
-git show origin/providers:src/providers/opencode-registration.test.ts                          > src/providers/opencode-registration.test.ts
-git show origin/providers:container/agent-runner/src/providers/opencode-registration.test.ts   > container/agent-runner/src/providers/opencode-registration.test.ts
+source setup/lib/channels-remote.sh && REMOTE=$(resolve_channels_remote)
+git show "$REMOTE"/providers:src/providers/opencode-registration.test.ts                          > src/providers/opencode-registration.test.ts
+git show "$REMOTE"/providers:container/agent-runner/src/providers/opencode-registration.test.ts   > container/agent-runner/src/providers/opencode-registration.test.ts
 ```
 
 ### 3. Append the self-registration imports

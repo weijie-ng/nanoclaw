@@ -26,6 +26,16 @@
 - **라이브 진행 상황** — 몇 초가 지나도 끝나지 않는 턴에서는 호스트가 일회용 메시지 하나를 보내 에이전트의 현재 추론 줄, 최근 도구 호출, 경과 시간을 표시하고, 턴이 진행되는 동안 계속 편집하다가 실제 응답이 도착하면 삭제합니다. 이 기능이 필수 경로가 되는 일은 없습니다. 모든 실패 경로는 전달 실패가 아니라 진행 메시지를 표시하지 않는 것으로 끝납니다. [라이브 진행 상황](docs/architecture.md#live-progress) 참고.
 - **Telegram 기본 포함** — 어댑터가 이 트리에 들어 있어 `/add-telegram`이 필요 없습니다. 여기에 포럼 토픽 라우팅, 봇에게 답장하면 반응하는 동작, 타이핑 표시 수정이 더해져 있습니다.
 
+**업스트림 따라가기.** 이 포크는 [nanocoai/nanoclaw](https://github.com/nanocoai/nanoclaw)를 대체하는 것이 아니라 그 위에 더하는 것입니다. upstream 리모트를 한 번만 추가해 두면 언제든 업데이트를 받아올 수 있습니다:
+
+```bash
+git remote add upstream https://github.com/nanocoai/nanoclaw.git
+```
+
+그런 다음 Claude Code에서 `/update-nanoclaw`를 실행해 변경 사항을 미리 보고 병합하세요. `/add-<channel>`과 `/add-<provider>` 스킬은 업스트림의 `channels`·`providers` 브랜치에서 어댑터를 직접 가져오므로 항상 최신입니다. 이 포크는 그 브랜치들을 의도적으로 미러링하지 않습니다. 미러링하면 복사한 날짜의 상태로 고정되기 때문입니다.
+
+Telegram을 사용한다면 주의할 점이 하나 있습니다. `src/channels/telegram.ts`는 업스트림 `channels` 브랜치가 소유하므로, `/add-telegram`을 다시 적용하거나 `/update-skills`를 실행하면 이 파일을 덮어쓰면서 이 포크의 포럼 기능이 매달려 있는 연결이 조용히 사라집니다. 그럴 때 `src/channels/telegram-forum-wiring.test.ts`가 빨간불이 됩니다 — 두 명령 중 하나를 실행한 뒤에는 이 테스트를 돌려보세요.
+
 이후 내용은 업스트림 README이며, clone URL만 이 포크를 가리키도록 바꿨습니다.
 
 ## NanoClaw를 만든 이유
