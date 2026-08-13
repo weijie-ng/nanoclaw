@@ -252,12 +252,110 @@ const preToolUseHook: HookCallback = async (input) => {
   const declaredTimeoutMs =
     toolName === 'Bash' && typeof i.tool_input?.timeout === 'number' ? (i.tool_input.timeout as number) : null;
   try {
-    setContainerToolInFlight(toolName, declaredTimeoutMs);
+    setContainerToolInFlight(toolName, declaredTimeoutMs, toolLabel(toolName, i.tool_input));
   } catch (err) {
     log(`PreToolUse: failed to record container_state: ${err instanceof Error ? err.message : String(err)}`);
   }
   return { continue: true };
 };
+
+/**
+ * Longest tool-input detail we keep. The host renders one tool per line beside
+ * a marker, so this is roughly what survives on a phone without wrapping — the
+ * point is to identify the call ("which file", "which command"), not to
+ * reproduce it.
+ */
+const TOOL_DETAIL_MAX = 44;
+
+/** Trailing path segments kept for a file argument — a bare basename is too
+ *  often ambiguous (every package has an index.ts). */
+const PATH_SEGMENTS_KEPT = 2;
+
+function collapse(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function clampDetail(detail: string): string {
+  const flat = collapse(detail);
+  return flat.length <= TOOL_DETAIL_MAX ? flat : flat.slice(0, TOOL_DETAIL_MAX - 1).trimEnd() + '…';
+}
+
+function shortenPath(p: string): string {
+  const segments = p.split('/').filter(Boolean);
+  return segments.slice(-PATH_SEGMENTS_KEPT).join('/');
+}
+
+function urlHost(raw: string): string {
+  try {
+    return new URL(raw).host || raw;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- an unparseable url is still worth showing verbatim
+  } catch {
+    return raw;
+  }
+}
+
+/**
+ * Display name for a tool. MCP tools arrive as `mcp__<server>__<tool>`, which
+ * eats a whole progress line in prefix; the tool half is the informative part.
+ */
+export function displayToolName(toolName: string): string {
+  if (!toolName.startsWith('mcp__')) return toolName;
+  const parts = toolName.split('__').filter(Boolean);
+  return parts[parts.length - 1] || toolName;
+}
+
+/**
+ * Reduce a tool's input to the one field that says which call this was.
+ *
+ * Returns '' when there is nothing worth showing — the caller then renders the
+ * bare tool name. Everything is clamped, so an input carrying a whole file's
+ * contents costs one short line, not the message.
+ */
+export function summarizeToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
+  if (!input) return '';
+  const str = (key: string): string => (typeof input[key] === 'string' ? (input[key] as string) : '');
+  switch (displayToolName(toolName)) {
+    case 'Bash':
+      return clampDetail(str('command'));
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'NotebookEdit':
+      return clampDetail(shortenPath(str('file_path')));
+    case 'Glob':
+      return clampDetail(str('pattern'));
+    case 'Grep': {
+      const where = shortenPath(str('path'));
+      const pattern = str('pattern');
+      return clampDetail(where ? `${pattern} · ${where}` : pattern);
+    }
+    case 'WebSearch':
+      return clampDetail(str('query'));
+    case 'WebFetch':
+      return clampDetail(urlHost(str('url')));
+    case 'Task':
+    case 'Agent':
+      return clampDetail(str('description'));
+    case 'Skill':
+      return clampDetail(str('skill'));
+    default: {
+      // Unknown tool (an MCP tool, most often). Object key order follows the
+      // model's own JSON, so the first string field is the closest thing to a
+      // primary argument available without a per-tool schema.
+      for (const value of Object.values(input)) {
+        if (typeof value === 'string' && collapse(value)) return clampDetail(value);
+      }
+      return '';
+    }
+  }
+}
+
+/** "Bash(pnpm test)" — what the host renders as one progress line. */
+export function toolLabel(toolName: string, input: Record<string, unknown> | undefined): string {
+  const name = displayToolName(toolName);
+  const detail = summarizeToolInput(toolName, input);
+  return detail ? `${name}(${detail})` : name;
+}
 
 /** Clear in-flight tool on PostToolUse / PostToolUseFailure. */
 const postToolUseHook: HookCallback = async () => {

@@ -159,12 +159,22 @@ function parseRecentTools(raw: string | null | undefined): string[] {
  * timeout hint when one is available (Bash exposes it in the tool_use input);
  * omit for tools with no declared timeout.
  *
- * Also appends `tool` to the recent_tools ring buffer (most-recent-LAST, capped
- * at RECENT_TOOLS_MAX) which the host renders as the "🔧 Read · Grep · …" line.
+ * Also appends `label` to the recent_tools ring buffer (most-recent-LAST, capped
+ * at RECENT_TOOLS_MAX) which the host renders as its "🔧 Bash(pnpm test)" lines.
  * That history outlives the individual tool call — only clearContainerProgress()
  * resets it, at turn boundaries.
+ *
+ * `label` is the display form ("Bash(pnpm test)"); `tool` stays the bare SDK
+ * name because current_tool is not decoration — the host sweep matches it
+ * exactly ('Bash') to widen its stuck tolerance for a long-declared script
+ * (host-sweep.ts). Defaults to the bare name for callers that have no input to
+ * summarize.
  */
-export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number | null): void {
+export function setContainerToolInFlight(
+  tool: string,
+  declaredTimeoutMs: number | null,
+  label: string = tool,
+): void {
   const now = new Date().toISOString();
   const db = getOutboundDb();
   // The ring buffer is a read-modify-write, so it runs inside a transaction:
@@ -177,7 +187,7 @@ export function setContainerToolInFlight(tool: string, declaredTimeoutMs: number
       | { recent_tools: string | null }
       | undefined;
     const recent = parseRecentTools(row?.recent_tools);
-    recent.push(tool);
+    recent.push(label);
     db.prepare(
       `INSERT INTO container_state (id, current_tool, tool_declared_timeout_ms, tool_started_at, recent_tools, updated_at)
        VALUES (1, ?, ?, ?, ?, ?)

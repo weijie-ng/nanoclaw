@@ -47,8 +47,15 @@ const FIRST_POST_DELAY_MS = 7000;
  * leaves headroom for the agent's actual replies.
  */
 const EDIT_INTERVAL_MS = 5000;
-/** Ring-buffer size the container writes; mirrored here for rendering. */
+/** Ring-buffer size the container writes; mirrored here for parsing. */
 const MAX_TOOLS = 5;
+/**
+ * How many of those we actually render. Each entry now carries its input
+ * ("Bash(pnpm test)") and gets its own line, so the whole buffer would make a
+ * seven-line message that grows and shrinks under the reader every 5s. Three
+ * is enough to show the shape of what the agent is doing.
+ */
+const RENDER_TOOLS = 3;
 /** Fallback backoff when a 429 arrives without a usable retry_after. */
 const DEFAULT_BACKOFF_MS = 30_000;
 /** Ceiling on honored retry_after, so a pathological value can't wedge
@@ -111,9 +118,17 @@ const progressTargets = new Map<string, ProgressTarget>();
 interface ProgressState {
   thinkingLine: string | null;
   recentTools: string[];
+  /**
+   * Is a tool running right now? The container appends to recent_tools on
+   * PreToolUse and clears current_tool on PostToolUse, so a non-null
+   * current_tool means the LAST buffer entry is the one in flight — which is
+   * all the host needs to mark it. The name itself isn't read: recent_tools
+   * already carries the display form, current_tool the bare SDK name.
+   */
+  toolInFlight: boolean;
 }
 
-const EMPTY_STATE: ProgressState = { thinkingLine: null, recentTools: [] };
+const EMPTY_STATE: ProgressState = { thinkingLine: null, recentTools: [], toolInFlight: false };
 
 /**
  * Read the container's progress columns from outbound.db (read-only —
@@ -134,13 +149,14 @@ function readProgressState(agentGroupId: string, sessionId: string): ProgressSta
     return EMPTY_STATE; // outbound.db doesn't exist yet (container still spawning)
   }
   try {
-    const row = db.prepare('SELECT recent_tools, thinking_line FROM container_state WHERE id = 1').get() as
-      | { recent_tools: string | null; thinking_line: string | null }
-      | undefined;
+    const row = db
+      .prepare('SELECT recent_tools, thinking_line, current_tool FROM container_state WHERE id = 1')
+      .get() as { recent_tools: string | null; thinking_line: string | null; current_tool: string | null } | undefined;
     if (!row) return EMPTY_STATE;
     return {
       thinkingLine: row.thinking_line && row.thinking_line.trim().length > 0 ? row.thinking_line.trim() : null,
       recentTools: parseTools(row.recent_tools),
+      toolInFlight: Boolean(row.current_tool),
     };
     // eslint-disable-next-line no-catch-all/no-catch-all -- a pre-feature session DB lacks these columns by design; the empty state is the answer
   } catch {
@@ -167,6 +183,17 @@ function parseTools(raw: string | null): string[] {
  * Render the progress body. Order is thinking → tools → elapsed, each
  * line dropped when it has nothing to say.
  *
+ * The tool block is one entry per line, oldest first, because entries carry
+ * their input now ("Bash(pnpm test -- progress)") and a joined line wraps at an
+ * unpredictable point on a phone. 🔧 anchors the block; ▸ marks the entry
+ * that's running right now:
+ *
+ *     🤔 Checking the wiring defaults
+ *     🔧 Grep(recent_tools · src/)
+ *        Read(progress/index.ts)
+ *      ▸ Bash(pnpm test -- progress)
+ *     ⏱ 34s
+ *
  * Never returns an empty string: Telegram's editMessage rejects empty
  * text with a ValidationError, and the very first post routinely lands
  * before the container has written either column (7s is often still
@@ -177,7 +204,14 @@ function parseTools(raw: string | null): string[] {
 export function renderProgress(state: ProgressState, elapsedMs: number): string {
   const lines: string[] = [];
   if (state.thinkingLine) lines.push(`🤔 ${state.thinkingLine}`);
-  if (state.recentTools.length > 0) lines.push(`🔧 ${state.recentTools.join(' · ')}`);
+  const shown = state.recentTools.slice(-RENDER_TOOLS);
+  shown.forEach((tool, idx) => {
+    const active = state.toolInFlight && idx === shown.length - 1;
+    // 🔧 always leads the block, so a single in-flight tool renders as
+    // "🔧 ▸ Bash(…)" rather than losing the anchor.
+    const prefix = idx === 0 ? (active ? '🔧 ▸ ' : '🔧 ') : active ? ' ▸ ' : '   ';
+    lines.push(`${prefix}${tool}`);
+  });
   if (lines.length === 0) lines.push('🔧 Working…');
   lines.push(`⏱ ${Math.floor(elapsedMs / 1000)}s`);
   return lines.join('\n');

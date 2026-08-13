@@ -45,6 +45,16 @@ describe('container_state — recent_tools ring buffer', () => {
     expect(JSON.parse(row.recent_tools!)).toEqual(['Read']);
   });
 
+  test('buffers the display label while current_tool keeps the bare name', () => {
+    // host-sweep.ts matches current_tool === 'Bash' exactly to widen its stuck
+    // tolerance for a long-declared script, so the label must not leak into it.
+    setContainerToolInFlight('Bash', 600_000, 'Bash(pnpm test -- progress)');
+
+    const row = readState()!;
+    expect(row.current_tool).toBe('Bash');
+    expect(JSON.parse(row.recent_tools!)).toEqual(['Bash(pnpm test -- progress)']);
+  });
+
   test('appends most-recent-LAST', () => {
     setContainerToolInFlight('Read', null);
     setContainerToolInFlight('Grep', null);

@@ -49,7 +49,7 @@ const POSTED_ID = '-100123:55';
  * there, the two forward-compat ALTERs are not.
  */
 function writeOutboundDb(
-  state: { recent_tools?: string | null; thinking_line?: string | null },
+  state: { recent_tools?: string | null; thinking_line?: string | null; current_tool?: string | null },
   withProgressColumns = true,
 ): void {
   const dir = path.join(DATA_DIR, 'v2-sessions', 'ag-1', SESSION);
@@ -65,13 +65,19 @@ function writeOutboundDb(
     ${withProgressColumns ? ', recent_tools TEXT, thinking_line TEXT' : ''}
   )`);
   if (withProgressColumns) {
-    db.prepare('INSERT INTO container_state (id, updated_at, recent_tools, thinking_line) VALUES (1, ?, ?, ?)').run(
+    db.prepare(
+      'INSERT INTO container_state (id, updated_at, recent_tools, thinking_line, current_tool) VALUES (1, ?, ?, ?, ?)',
+    ).run(
       new Date().toISOString(),
       state.recent_tools ?? null,
       state.thinking_line ?? null,
+      state.current_tool ?? null,
     );
   } else {
-    db.prepare('INSERT INTO container_state (id, updated_at) VALUES (1, ?)').run(new Date().toISOString());
+    db.prepare('INSERT INTO container_state (id, updated_at, current_tool) VALUES (1, ?, ?)').run(
+      new Date().toISOString(),
+      state.current_tool ?? null,
+    );
   }
   db.close();
 }
@@ -156,17 +162,54 @@ afterEach(async () => {
 });
 
 describe('renderProgress', () => {
-  it('renders thinking, tools and elapsed in order', () => {
+  it('renders thinking, tools and elapsed in order, one tool per line', () => {
     expect(
-      renderProgress({ thinkingLine: 'Checking the build logs', recentTools: ['Read', 'Grep', 'Bash'] }, 34_000),
-    ).toBe('🤔 Checking the build logs\n🔧 Read · Grep · Bash\n⏱ 34s');
+      renderProgress(
+        {
+          thinkingLine: 'Checking the build logs',
+          recentTools: ['Grep(recent_tools · src/)', 'Read(progress/index.ts)', 'Bash(pnpm test -- progress)'],
+          toolInFlight: true,
+        },
+        34_000,
+      ),
+    ).toBe(
+      '🤔 Checking the build logs\n' +
+        '🔧 Grep(recent_tools · src/)\n' +
+        '   Read(progress/index.ts)\n' +
+        ' ▸ Bash(pnpm test -- progress)\n' +
+        '⏱ 34s',
+    );
   });
 
-  it('drops the lines it has nothing for and never renders empty', () => {
-    expect(renderProgress({ thinkingLine: null, recentTools: ['Edit'] }, 9_400)).toBe('🔧 Edit\n⏱ 9s');
+  it('renders only the newest RENDER_TOOLS entries', () => {
+    // The container's ring buffer holds five; a five-line tool block would
+    // make the message jump under the reader on every edit.
+    const text = renderProgress(
+      { thinkingLine: null, recentTools: ['A', 'B', 'C', 'D', 'E'], toolInFlight: false },
+      12_000,
+    );
+    expect(text).toBe('🔧 C\n   D\n   E\n⏱ 12s');
+  });
+
+  it('marks nothing between tool calls', () => {
+    // PostToolUse clears current_tool while the buffer keeps its history.
+    expect(renderProgress({ thinkingLine: null, recentTools: ['Read(a.ts)'], toolInFlight: false }, 9_400)).toBe(
+      '🔧 Read(a.ts)\n⏱ 9s',
+    );
+  });
+
+  it('keeps the 🔧 anchor when the only tool is the one in flight', () => {
+    expect(renderProgress({ thinkingLine: null, recentTools: ['Read(a.ts)'], toolInFlight: true }, 9_400)).toBe(
+      '🔧 ▸ Read(a.ts)\n⏱ 9s',
+    );
+  });
+
+  it('never renders empty', () => {
     // Empty text is a ValidationError from Telegram's editMessage, so
     // the no-data case still has to produce something.
-    expect(renderProgress({ thinkingLine: null, recentTools: [] }, 7_000)).toBe('🔧 Working…\n⏱ 7s');
+    expect(renderProgress({ thinkingLine: null, recentTools: [], toolInFlight: false }, 7_000)).toBe(
+      '🔧 Working…\n⏱ 7s',
+    );
   });
 });
 
@@ -282,11 +325,14 @@ describe('startProgress', () => {
   it("renders the container's thinking line and tool ring from outbound.db", async () => {
     writeOutboundDb({
       thinking_line: 'Tracing the delivery path',
-      recent_tools: JSON.stringify(['Read', 'Grep', 'Bash', 'Edit']),
+      recent_tools: JSON.stringify(['Read(delivery.ts)', 'Grep(deliver · src/)', 'Bash(pnpm test)', 'Edit(router.ts)']),
+      current_tool: 'Edit',
     });
     start();
     await vi.advanceTimersByTimeAsync(7_050);
-    expect(sent[0].payload.text).toBe('🤔 Tracing the delivery path\n🔧 Read · Grep · Bash · Edit\n⏱ 7s');
+    expect(sent[0].payload.text).toBe(
+      '🤔 Tracing the delivery path\n🔧 Grep(deliver · src/)\n   Bash(pnpm test)\n ▸ Edit(router.ts)\n⏱ 7s',
+    );
   });
 
   it('falls back to the seed when the session DB predates the progress columns', async () => {
