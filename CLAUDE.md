@@ -70,6 +70,7 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/guard/` | Privileged-action decision seam: `guard(action, input)` → allow \| hold \| deny. Module-edge `guard.ts` adapters (cli, agent-to-agent, self-mod, permissions) define each action's decision; ncl commands + delivery actions demand a guard at registration; approved replays carry the approval row as a grant and re-run the checks. Conformance test: `src/guard/conformance.test.ts` |
 | `src/modules/permissions/access.ts` | `canAccessAgentGroup` — owner / global admin / scoped admin / member resolution against `user_roles` + `agent_group_members` |
 | `src/modules/approvals/primitive.ts` | `pickApprover`, `pickApprovalDelivery`, `requestApproval`, approval-handler registry |
+| `src/modules/topic-spawn/` | `spawn_topic_agent` — an agent opens a topic beside its own chat with a new agent in it. One topic = one messaging group (3-part `platform_id`), wired + access-copied + brief replayed; guard-wrapped (`topics.spawn`), needs `adapter.createThread`. See [docs/topic-spawn.md](docs/topic-spawn.md) |
 | `src/command-gate.ts` | Router-side admin command gate — queries `user_roles` directly (no env var, no container-side check) |
 | `src/modules/approvals/onecli-approvals.ts` | OneCLI credentialed-action approval bridge |
 | `src/modules/permissions/user-dm.ts` | Cold-DM resolution + `user_dms` cache |
@@ -80,6 +81,7 @@ For ad-hoc queries from skills or scripts, use the in-tree wrapper rather than t
 | `src/db/` | DB layer — agent_groups, messaging_groups, sessions, container_configs, user_roles, user_dms, pending_*, migrations |
 | `src/channels/` | Channel adapter infra (registry, Chat SDK bridge); specific channel adapters are skill-installed from the `channels` branch |
 | `src/channels/channel-defaults.ts` | Wiring-creation helpers over adapter-declared channel defaults (`resolveWiringDefaults`, `resolveThreadPolicy`, engage validation) |
+| `src/channels/telegram-forum.ts` | Trunk-owned pure half of Telegram forum handling (topic routing, topic creation, typing qualification) — `src/channels/telegram.ts` is branch-owned and keeps only the wiring, so nothing here is lost on `/add-telegram` re-apply |
 | `src/providers/` | Host-side provider container-config (`claude` baked in; `opencode` etc. installed from the `providers` branch) |
 | `container/agent-runner/src/` | Agent-runner: poll loop, formatter, provider abstraction, MCP tools, destinations |
 | `container/skills/` | Container skills mounted into every agent session (`agent-browser`, `frontend-engineer`, `onecli-gateway`, `self-customize`, `welcome`; opt-in skills like `vercel-cli`, `slack-formatting` and `whatsapp-formatting` install with the `/add-*` skill that adds their capability) |
@@ -291,6 +293,7 @@ This project uses pnpm with `minimumReleaseAge: 4320` (3 days) in `pnpm-workspac
 | [docs/db-session.md](docs/db-session.md) | Per-session `inbound.db` + `outbound.db` schemas + seq parity |
 | [docs/agent-runner-details.md](docs/agent-runner-details.md) | Agent-runner internals + MCP tool interface |
 | [docs/isolation-model.md](docs/isolation-model.md) | Three-level channel isolation model |
+| [docs/topic-spawn.md](docs/topic-spawn.md) | Topic agents (`spawn_topic_agent`): why a topic is a messaging group, the spawn flow, authorization, access inheritance, operator recipes |
 | [docs/setup-wiring.md](docs/setup-wiring.md) | What's wired, what's open in the setup flow |
 | [docs/architecture-diagram.md](docs/architecture-diagram.md) | Diagram version of the architecture |
 | [docs/build-and-runtime.md](docs/build-and-runtime.md) | Runtime split (Node host + Bun container), lockfiles, image build surface, CI, key invariants |

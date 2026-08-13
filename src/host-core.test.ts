@@ -464,6 +464,80 @@ describe('router', () => {
     expect(getMessagingGroupByPlatform('slack', 'C-MENTIONED')).toBeDefined();
   });
 
+  it('a sub-conversation of a DENIED chat is dropped, not escalated again', async () => {
+    // Sub-conversations (a Telegram forum topic, and anything shaped like
+    // one) are addressed by EXTENDING the chat's platform id, so each one
+    // arrives as an unknown id. Without inheriting the parent's decision,
+    // anyone with topic-creation rights in a chat the owner already REJECTED
+    // could mint an unlimited stream of fresh "Connect this channel?" cards in
+    // the owner's DM — one per topic — from a chat that was refused.
+    const { routeInbound } = await import('./router.js');
+    const { getMessagingGroupByPlatform, setMessagingGroupDeniedAt } = await import('./db/messaging-groups.js');
+
+    createMessagingGroup({
+      id: 'mg-denied',
+      channel_type: 'telegram',
+      platform_id: 'telegram:-100999',
+      name: 'Rejected supergroup',
+      is_group: 1,
+      unknown_sender_policy: 'request_approval',
+      created_at: now(),
+    });
+    setMessagingGroupDeniedAt('mg-denied', now());
+
+    await routeInbound({
+      channelType: 'telegram',
+      platformId: 'telegram:-100999:42',
+      threadId: null,
+      message: {
+        id: 'msg-topic',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'Stranger', text: '@bot hi' }),
+        timestamp: now(),
+        isMention: true,
+        isGroup: true,
+      },
+    });
+
+    expect(getMessagingGroupByPlatform('telegram', 'telegram:-100999:42')).toBeUndefined();
+  });
+
+  it('a sub-conversation of a live chat inherits its unknown_sender_policy', async () => {
+    // A topic must be exactly as open (or as closed) as the chat it lives in
+    // — never the channel-wide default, which would silently widen or narrow
+    // who may talk to this install.
+    const { routeInbound } = await import('./router.js');
+    const { getMessagingGroupByPlatform } = await import('./db/messaging-groups.js');
+
+    createMessagingGroup({
+      id: 'mg-open',
+      channel_type: 'telegram',
+      platform_id: 'telegram:-100777',
+      name: 'Community',
+      is_group: 1,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    await routeInbound({
+      channelType: 'telegram',
+      platformId: 'telegram:-100777:9',
+      threadId: null,
+      message: {
+        id: 'msg-topic-open',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'Member', text: '@bot hi' }),
+        timestamp: now(),
+        isMention: true,
+        isGroup: true,
+      },
+    });
+
+    // Telegram's declared group default is 'request_approval', so inheriting
+    // is the only way this reads 'public'.
+    expect(getMessagingGroupByPlatform('telegram', 'telegram:-100777:9')?.unknown_sender_policy).toBe('public');
+  });
+
   it('should route multiple messages to the same session', async () => {
     const { routeInbound } = await import('./router.js');
 

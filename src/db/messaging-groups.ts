@@ -114,6 +114,50 @@ export function getMessagingGroupsByChannel(channelType: string): MessagingGroup
   return getDb().prepare('SELECT * FROM messaging_groups WHERE channel_type = ?').all(channelType) as MessagingGroup[];
 }
 
+/**
+ * Delimiters an adapter may use to extend a chat's platform id into one of
+ * its sub-conversations (Telegram `telegram:<chat>:<topic>`, path-shaped ids
+ * elsewhere).
+ */
+const SUB_CONVERSATION_DELIMITERS = [':', '/'];
+
+/**
+ * The registered messaging group this platform id is a SUB-CONVERSATION of,
+ * if any — the nearest such ancestor.
+ *
+ * There is no parent/child column and no thread flag to read: the platforms
+ * this matters for declare `supportsThreads: false`, which is exactly why each
+ * sub-conversation gets its own messaging_groups row. The one signal that
+ * isn't platform-specific: an adapter that can mint sub-conversations
+ * addresses them by EXTENDING the parent's platform_id (that extension is what
+ * lets it resolve a sub-id back to its parent chat), so a registered row whose
+ * platform_id is a proper prefix of ours AT A DELIMITER BOUNDARY is our
+ * parent. The boundary requirement is what keeps a numeric sibling
+ * ("…:100" vs "…:1000") from reading as a parent.
+ *
+ * Advisory, and safe in both directions: a chat whose parent was never
+ * registered reads as a root (correct — nothing above it is wired), and a
+ * platform whose sub-ids aren't derived from the parent's id reads as a root
+ * too.
+ *
+ * Instance-exact: a sibling adapter instance of the same platform is a
+ * different bot identity, so its rows are never our ancestors.
+ */
+export function findParentMessagingGroup(
+  channelType: string,
+  instance: string,
+  platformId: string,
+): MessagingGroup | undefined {
+  let nearest: MessagingGroup | undefined;
+  for (const other of getMessagingGroupsByChannel(channelType)) {
+    if ((other.instance ?? other.channel_type) !== instance) continue;
+    if (other.platform_id === platformId) continue;
+    if (!SUB_CONVERSATION_DELIMITERS.some((d) => platformId.startsWith(other.platform_id + d))) continue;
+    if (!nearest || other.platform_id.length > nearest.platform_id.length) nearest = other;
+  }
+  return nearest;
+}
+
 export function updateMessagingGroup(
   id: string,
   updates: Partial<Pick<MessagingGroup, 'name' | 'is_group' | 'unknown_sender_policy'>>,

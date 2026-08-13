@@ -230,6 +230,22 @@ export interface ChannelAdapter {
   openDM?(userHandle: string): Promise<string>;
 
   /**
+   * Create a platform-native sub-conversation under `platformId` (a Telegram
+   * forum topic, a Discord thread, …) named `name`, and return the
+   * fully-qualified platform id that addresses it — for Telegram
+   * `telegram:<chatId>:<topicId>`.
+   *
+   * The returned id is a messaging_groups.platform_id: callers register the
+   * new sub-conversation as its own messaging group and wire an agent to it,
+   * and deliver() must accept it as-is.
+   *
+   * Platforms with no such concept simply omit this method; callers must
+   * feature-detect (`typeof adapter.createThread === 'function'`) rather than
+   * assume it exists.
+   */
+  createThread?(platformId: string, name: string): Promise<string>;
+
+  /**
    * Declared wiring-time defaults for this channel. Optional for backward
    * compatibility with stale adapter copies; absent → core fallback
    * (fallbackChannelDefaults(supportsThreads), see channel-registry.ts).

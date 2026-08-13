@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { createReplyContextExtractor } from './telegram.js';
+import { createReplyContextExtractor } from './telegram-reply.js';
 
 const KNOWN = () => 'MyNanoClawBot';
 const UNRESOLVED = () => null;

@@ -10,7 +10,18 @@ import { log } from '../log.js';
 import { createMessagingGroup, getMessagingGroupByPlatform, updateMessagingGroup } from '../db/messaging-groups.js';
 import { grantRole, hasAnyOwner } from '../modules/permissions/db/user-roles.js';
 import { upsertUser } from '../modules/permissions/db/users.js';
-import { createChatSdkBridge, type ReplyContext, type ReplyContextExtractor } from './chat-sdk-bridge.js';
+import { createChatSdkBridge } from './chat-sdk-bridge.js';
+// Trunk-owned (this file is branch-owned and gets overwritten by
+// /add-telegram — see the header of telegram-forum.ts).
+import {
+  createCachedForumProbe,
+  createForumTopic,
+  createForumTopicRewriter,
+  createTypingThreadResolver,
+  fetchIsForum,
+  isTelegramTopicMessage,
+} from './telegram-forum.js';
+import { createReplyContextExtractor } from './telegram-reply.js';
 import { sanitizeTelegramLegacyMarkdown } from './telegram-markdown-sanitize.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage } from './adapter.js';
@@ -49,37 +60,6 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, maxAttempts = 5
   throw lastErr;
 }
 
-/**
- * Reply-context extractor, closed over the bot's own username so it can flag
- * replies aimed at us (`toBot`) — the bridge promotes those to isMention, which
- * is what lets a group wiring in engage_mode 'mention' answer a plain reply
- * without the user re-typing @botname. Telegram's own mention detection is
- * text-only (@username / text_mention / bot_command entities), so a reply
- * carries no mention signal of its own.
- *
- * `getBotUsername` is a getter, not a value: getMe resolves asynchronously
- * after the adapter is constructed. Until it lands (or if it failed outright)
- * we fall back to `is_bot` — over-matching in the rare two-bot group beats a
- * feature that silently does nothing.
- */
-export function createReplyContextExtractor(getBotUsername: () => string | null): ReplyContextExtractor {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (raw: Record<string, any>): ReplyContext | null => {
-    if (!raw.reply_to_message) return null;
-    const reply = raw.reply_to_message;
-    const from = reply.from ?? {};
-    const botUsername = getBotUsername();
-    const toBot = botUsername
-      ? typeof from.username === 'string' && from.username.toLowerCase() === botUsername.toLowerCase()
-      : from.is_bot === true;
-    return {
-      text: reply.text || reply.caption || '',
-      sender: from.first_name || from.username || 'Unknown',
-      toBot,
-    };
-  };
-}
-
 /** Look up the bot username via Telegram getMe. Cached after first call. */
 async function fetchBotUsername(token: string): Promise<string | null> {
   try {
@@ -90,70 +70,6 @@ async function fetchBotUsername(token: string): Promise<string | null> {
     log.warn('Telegram getMe failed', { err });
     return null;
   }
-}
-
-/** Telegram's reserved message_thread_id for a forum's General topic. */
-const GENERAL_TOPIC_ID = 1;
-
-/**
- * Pure half of the forum typing fix.
- *
- * Thread ids are `telegram:<chatId>[:<messageThreadId>]`. Telegram encodes a
- * forum's General topic by OMITTING message_thread_id, so a General message
- * produces a two-part id indistinguishable from one in a plain group.
- * `sendMessage` infers General from that and delivers fine; `sendChatAction`
- * accepts it with `ok:true` and then renders nothing, which is why the typing
- * indicator was invisible in forum groups while every log line said it had
- * been sent. Naming General explicitly is what makes it show up.
- *
- * Leaves an already topic-qualified id alone — that one is addressed correctly.
- */
-export function qualifyForumTypingThreadId(threadId: string, isForum: boolean): string {
-  if (!isForum) return threadId;
-  const parts = threadId.split(':');
-  if (parts.length !== 2 || parts[0] !== 'telegram' || !parts[1]) return threadId;
-  return `${threadId}:${GENERAL_TOPIC_ID}`;
-}
-
-/** getChat → is this chat a forum supergroup? Failure reads as "not a forum". */
-async function fetchIsForum(token: string, chatId: string): Promise<boolean> {
-  const res = await fetch(`https://api.telegram.org/bot${token}/getChat`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId }),
-  });
-  const data = (await res.json()) as { ok?: boolean; result?: { is_forum?: boolean } };
-  return data.ok === true && data.result?.is_forum === true;
-}
-
-/**
- * Builds the bridge's `resolveTypingThreadId` hook: caches each chat's
- * forum-ness, then defers to `qualifyForumTypingThreadId`.
- */
-export function createTypingThreadResolver(
-  isForumChat: (chatId: string) => Promise<boolean>,
-): (threadId: string) => Promise<string> {
-  const cache = new Map<string, Promise<boolean>>();
-  return async (threadId: string): Promise<string> => {
-    const parts = threadId.split(':');
-    if (parts.length !== 2 || parts[0] !== 'telegram' || !parts[1]) return threadId;
-    const chatId = parts[1];
-    let pending = cache.get(chatId);
-    if (!pending) {
-      // Cache the promise rather than the result: typing re-fires every 4s,
-      // so caching only on resolve would start a getChat per tick until the
-      // first one lands.
-      pending = isForumChat(chatId).catch((err) => {
-        // Evict on failure. A cached `false` from one flaky getChat would
-        // disable the typing indicator for that chat until the next restart.
-        cache.delete(chatId);
-        log.warn('Telegram getChat (is_forum) failed', { chatId, err });
-        return false;
-      });
-      cache.set(chatId, pending);
-    }
-    return qualifyForumTypingThreadId(threadId, await pending);
-  };
 }
 
 function isGroupPlatformId(platformId: string): boolean {
@@ -313,10 +229,22 @@ registerChannelAdapter('telegram', {
       botUsername = name;
     });
 
+    // is_forum probe for inbound topic routing. Typing deliberately does NOT
+    // share it: this probe swallows a failed getChat into `false`, so handing
+    // it to createTypingThreadResolver would hide the rejection that its own
+    // eviction keys on, and one flaky getChat would pin `false` — killing the
+    // typing indicator in that forum until the host restarts. Two caches, one
+    // extra getChat per chat per process, both correct on failure.
+    const isForumChat = createCachedForumProbe((chatId) => fetchIsForum(token, chatId));
+
     const bridge = createChatSdkBridge({
       adapter: telegramAdapter,
       concurrency: 'concurrent',
       extractReplyContext: createReplyContextExtractor(() => botUsername),
+      // Per-message topic flag. `is_forum` is chat-level and does NOT exclude
+      // ordinary reply/discussion threads, which carry a message_thread_id of
+      // their own — only `is_topic_message` separates the two.
+      detectSubConversation: isTelegramTopicMessage,
       resolveTypingThreadId: createTypingThreadResolver((chatId) => fetchIsForum(token, chatId)),
       supportsThreads: false,
       defaults: TELEGRAM_DEFAULTS,
@@ -341,10 +269,23 @@ registerChannelAdapter('telegram', {
           return null;
         }
       },
+      createThread: (platformId: string, name: string) => createForumTopic(token, platformId, name),
       async setup(hostConfig: ChannelSetup) {
+        // Order matters: pairing outermost (raw chat-level platform id), the
+        // forum rewrite between it and the host. Chosen over making
+        // isGroupPlatformId positional because pairing is about chat
+        // ownership, not topic ownership — a code typed in any topic must pair
+        // (and register the messaging group for) the CHAT. Running pairing on
+        // a topic-qualified id would both register the wrong platform_id and
+        // mis-classify it: isGroupPlatformId pops the LAST ':' segment and
+        // tests for a leading '-', so "telegram:-100…:42" reads as a DM.
         const intercepted: ChannelSetup = {
           ...hostConfig,
-          onInbound: createPairingInterceptor(botUsernamePromise, hostConfig.onInbound, token),
+          onInbound: createPairingInterceptor(
+            botUsernamePromise,
+            createForumTopicRewriter(isForumChat, hostConfig.onInbound),
+            token,
+          ),
         };
         return withRetry(() => bridge.setup(intercepted), 'bridge.setup');
       },

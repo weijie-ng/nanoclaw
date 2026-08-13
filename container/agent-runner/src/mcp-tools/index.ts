@@ -8,6 +8,7 @@
 import './core.js';
 import './interactive.js';
 import './agents.js';
+import './topics.js';
 import './self-mod.js';
 import { startMcpServer } from './server.js';
 

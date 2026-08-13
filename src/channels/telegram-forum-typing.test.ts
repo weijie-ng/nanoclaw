@@ -14,7 +14,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTypingThreadResolver, qualifyForumTypingThreadId } from './telegram.js';
+import { createTypingThreadResolver, qualifyForumTypingThreadId } from './telegram-forum.js';
 
 describe('qualifyForumTypingThreadId', () => {
   it('names the General topic explicitly in a forum', () => {

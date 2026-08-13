@@ -24,6 +24,7 @@ import { getAgentGroup } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
   createMessagingGroup,
+  findParentMessagingGroup,
   getMessagingGroupAgents,
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
@@ -200,6 +201,26 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     // attention (the bot was addressed — @mention or DM). Plain chatter in
     // channels we merely sit in stays silent — no row, no DB writes.
     if (!isMention) return;
+    // A sub-conversation (a Telegram forum topic and anything shaped like
+    // one) is addressed by EXTENDING its chat's platform id, so it arrives
+    // here as an unknown id even when the CHAT is a known, decided one. Its
+    // parent's decisions have to reach it, or an adapter that promotes
+    // sub-conversations to their own rows hands anyone who can open one a way
+    // around them:
+    //  - denied_at — the owner refused this chat; every topic in it is the
+    //    same refusal. Without this, each new topic mints a fresh row and a
+    //    fresh "Connect this channel?" card in the owner's DM, unbounded.
+    //  - unknown_sender_policy — a topic must be exactly as open (or as
+    //    closed) as the chat it lives in, never the channel-wide default.
+    const parentMg = findParentMessagingGroup(event.channelType, event.instance ?? event.channelType, event.platformId);
+    if (parentMg?.denied_at) {
+      log.debug('Message dropped — the parent chat was denied by owner', {
+        parentMessagingGroupId: parentMg.id,
+        platformId: event.platformId,
+        deniedAt: parentMg.denied_at,
+      });
+      return;
+    }
     const mgId = `mg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     mg = {
       id: mgId,
@@ -210,15 +231,18 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
       instance: event.instance ?? event.channelType,
       name: null,
       is_group: event.message.isGroup ? 1 : 0,
-      // Policy from the receiving channel's declared defaults (DM vs group
-      // context); undeclared adapters resolve through the behavior-faithful
-      // fallback, which is 'request_approval' in both contexts — identical
-      // to the historical hardcode.
-      unknown_sender_policy: resolveUnknownSenderPolicy(
-        event.instance ?? event.channelType,
-        event.message.isGroup === true,
-        event.channelType,
-      ),
+      // Inherited from the parent chat when this is a sub-conversation of a
+      // registered one; otherwise from the receiving channel's declared
+      // defaults (DM vs group context) — undeclared adapters resolve through
+      // the behavior-faithful fallback, which is 'request_approval' in both
+      // contexts, identical to the historical hardcode.
+      unknown_sender_policy:
+        parentMg?.unknown_sender_policy ??
+        resolveUnknownSenderPolicy(
+          event.instance ?? event.channelType,
+          event.message.isGroup === true,
+          event.channelType,
+        ),
       denied_at: null,
       created_at: new Date().toISOString(),
     };

@@ -924,6 +924,7 @@ sweep.
 | Tool | What it does |
 |------|-------------|
 | `create_agent` | `action: 'create_agent'` (name + instructions); host creates the agent group (replaces the old `register_agent_group`) |
+| `spawn_topic_agent` | `action: 'spawn_topic_agent'` (name + instructions + brief); host creates a sub-conversation next to the caller's own chat (`adapter.createThread`) and a new agent group wired to it. One topic = one messaging group. See [topic-spawn.md](topic-spawn.md) |
 | `install_packages` | `action: 'install_packages'`; on approval host rebuilds the per-agent image and restarts |
 | `add_mcp_server` | `action: 'add_mcp_server'`; on approval host updates `container.json` and restarts |
 

@@ -84,6 +84,20 @@ export interface ChatSdkBridgeConfig {
   /** Platform-specific reply context extraction. */
   extractReplyContext?: ReplyContextExtractor;
   /**
+   * Does this raw message belong to a SUB-CONVERSATION (a Telegram forum
+   * topic, and anything shaped like one) rather than to the channel itself?
+   *
+   * A thread id alone can't answer that: platforms reuse the same field for
+   * reply/discussion threads, which are the same conversation. Only the raw
+   * payload carries the distinction (Telegram: `is_topic_message`), and raw is
+   * dropped before the message reaches the host — so the answer is projected
+   * onto the inbound content as `isSubConversation` here, at the one place raw
+   * is still in hand. Consumers must treat an ABSENT flag as "unknown" (a
+   * stale adapter copy that doesn't pass this hook), not as `false`.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  detectSubConversation?: (raw: Record<string, any>) => boolean;
+  /**
    * Last-chance rewrite of the thread id used for the typing indicator ONLY.
    * Exists because a platform can require more addressing for a chat action
    * than it does for a message: Telegram forum supergroups infer the topic on
@@ -258,6 +272,14 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       const replyTo = config.extractReplyContext(message.raw as Record<string, any>);
       if (replyTo) serialized.replyTo = replyTo;
       mention = resolveInboundMention(mention, replyTo);
+    }
+
+    // Project the per-message sub-conversation flag while raw is still here
+    // (it is dropped below). Absent when the channel declares no detector —
+    // consumers read that as "unknown", never as "no".
+    if (config.detectSubConversation && message.raw) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      serialized.isSubConversation = config.detectSubConversation(message.raw as Record<string, any>);
     }
 
     // Project chat-sdk's nested author into the flat sender fields the router
