@@ -130,6 +130,29 @@ export const TOOL_ALLOWLIST = [
   'NotebookEdit',
 ];
 
+/**
+ * Bundled skills that must never load in an agent container.
+ *
+ * `claude-api` ships inside the image with the Claude CLI — it is not one of
+ * container/skills/, so the group's `skills` config can't exclude it. Its
+ * SKILL.md is ~800KB (~200k tokens) and loads in a single shot, which overflows
+ * the context window before the agent can answer anything. Its own trigger
+ * fires on any message naming a Claude model, so a plain "what model are you?"
+ * takes the whole turn down with "Prompt is too long".
+ *
+ * Blocked at PreToolUse rather than via `disallowedTools` because `Skill` must
+ * stay allowed for this install's own skills, and because the payload arrives
+ * as the tool RESULT — refusing the call is what keeps it out of the transcript.
+ */
+export const SDK_DISALLOWED_SKILLS = ['claude-api'];
+
+/** The skill this Skill call would load, or '' when it isn't a Skill call. */
+export function blockedSkillName(toolName: string, input: Record<string, unknown> | undefined): string {
+  if (toolName !== 'Skill') return '';
+  const skill = typeof input?.skill === 'string' ? input.skill : '';
+  return SDK_DISALLOWED_SKILLS.includes(skill) ? skill : '';
+}
+
 // MCP server names are sanitized by the SDK when forming tool prefixes:
 // any character outside [A-Za-z0-9_-] becomes '_'. Mirror that here so our
 // allowlist patterns match what the SDK actually exposes.
@@ -245,6 +268,13 @@ const preToolUseHook: HookCallback = async (input) => {
     return {
       decision: 'block',
       stopReason: `Tool '${toolName}' is not available in this environment — use the nanoclaw equivalent.`,
+    } as unknown as ReturnType<HookCallback>;
+  }
+  const blockedSkill = blockedSkillName(toolName, i.tool_input);
+  if (blockedSkill) {
+    return {
+      decision: 'block',
+      stopReason: `The '${blockedSkill}' skill is unavailable here — it is far too large for this context window. Answer from what you already know instead.`,
     } as unknown as ReturnType<HookCallback>;
   }
   // Bash exposes its timeout via the tool_input.timeout field (ms). Any other

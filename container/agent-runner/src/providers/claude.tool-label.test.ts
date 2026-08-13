@@ -11,7 +11,7 @@ mock.module('@anthropic-ai/claude-agent-sdk', () => ({
   query: () => (async function* () {})(),
 }));
 
-const { summarizeToolInput, toolLabel, displayToolName } = await import('./claude.js');
+const { summarizeToolInput, toolLabel, displayToolName, blockedSkillName } = await import('./claude.js');
 
 /** Mirrors TOOL_DETAIL_MAX in claude.ts. */
 const DETAIL_MAX = 44;
@@ -76,6 +76,26 @@ describe('displayToolName', () => {
   it('strips the mcp__server__ prefix that would eat a whole line', () => {
     expect(displayToolName('mcp__nanoclaw__send_message')).toBe('send_message');
     expect(displayToolName('Bash')).toBe('Bash');
+  });
+});
+
+describe('blockedSkillName', () => {
+  // claude-api's SKILL.md is ~800KB and loads in one shot, so a single call
+  // overflows the context window — an agent asked "what model are you?" answers
+  // "Prompt is too long" instead. It ships inside the image, so the group's
+  // `skills` config cannot exclude it; PreToolUse is the only gate.
+  it('names the skill on a Skill call that would blow the context window', () => {
+    expect(blockedSkillName('Skill', { skill: 'claude-api' })).toBe('claude-api');
+  });
+
+  it('lets every other skill through', () => {
+    expect(blockedSkillName('Skill', { skill: 'onecli-gateway' })).toBe('');
+    expect(blockedSkillName('Skill', {})).toBe('');
+  });
+
+  it('ignores non-Skill tools, including one carrying a same-named argument', () => {
+    expect(blockedSkillName('Bash', { skill: 'claude-api' })).toBe('');
+    expect(blockedSkillName('Read', undefined)).toBe('');
   });
 });
 
