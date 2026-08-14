@@ -129,6 +129,15 @@ vi.mock('../../channels/channel-registry.js', () => ({
       ...(state.adapterCanCreateThreads ? { createThread: mockCreateThread } : {}),
     };
   },
+  // Telegram's real declaration (src/channels/telegram.ts). resolveWiringDefaults
+  // reads through here, so the wiring assertions below exercise the same
+  // resolution ncl and the setup wizard use rather than a stubbed answer.
+  getChannelDefaults: () => ({
+    dm: { engageMode: 'pattern', engagePattern: '.', threads: false, unknownSenderPolicy: 'request_approval' },
+    group: { engageMode: 'mention', threads: false, unknownSenderPolicy: 'request_approval' },
+    mentions: 'platform',
+  }),
+  hasDeclaredChannelDefaults: () => true,
 }));
 vi.mock('../agent-to-agent/db/agent-destinations.js', () => ({
   getDestinationByName: () => undefined,
@@ -377,12 +386,15 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
       is_group: 1,
     });
 
-    // Inside its own topic the agent answers without an @mention.
+    // Engagement comes from the channel's group-context declaration, not a
+    // spawn-specific override: a topic is still a shared conversation between
+    // humans, so the agent engages on an @mention (or a reply to it, which the
+    // bridge promotes to one) and stays out of the rest.
     expect(mockCreateMessagingGroupAgent.mock.calls[0][0]).toMatchObject({
       messaging_group_id: topicMg.id,
       agent_group_id: newGroup.id,
-      engage_mode: 'pattern',
-      engage_pattern: '.',
+      engage_mode: 'mention',
+      engage_pattern: null,
     });
 
     // Bidirectional parent/child destinations + the projection into the
@@ -488,7 +500,7 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
       instance: string;
       platformId: string;
       threadId: string | null;
-      message: { content: string };
+      message: { content: string; isMention?: boolean };
     };
     expect(event).toMatchObject({
       channelType: 'telegram',
@@ -496,6 +508,11 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
       platformId: 'telegram:-1001:42',
       threadId: null,
     });
+    // Coupled to the wiring above: the topic is wired 'mention', and a
+    // synthetic replay carries no platform mention signal. Without this flag
+    // the brief routes and is judged not-addressed, and the agent that was
+    // just spawned to handle it never wakes.
+    expect(event.message.isMention).toBe(true);
     const content = JSON.parse(event.message.content) as { text: string; senderId: string };
     expect(content.text).toBe('book flights to Lisbon');
     // The owner passes canAccessAgentGroup for a group with no members yet.

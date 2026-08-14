@@ -108,9 +108,15 @@ first thing, summarize the runbook Dana posted."*
 8. **Messaging group.** The 3-part `platform_id` from step 6, `is_group: 1`,
    `instance` copied from the parent, `unknown_sender_policy` **inherited from
    the parent chat**.
-9. **Wiring.** `engage_mode: 'pattern'`, `engage_pattern: '.'` — the sentinel
-   for "match every message". Inside its own topic the new agent is the only
-   agent, so it answers without being mentioned. Plus
+9. **Wiring.** `engage_mode` / `engage_pattern` come from the channel's own
+   **group-context declaration** via `resolveWiringDefaults`, the same
+   resolution `ncl wirings create`, the setup wizard and the channel-approval
+   connect path use — a spawned wiring is not a special case. On a mention
+   channel (Telegram, Slack, Discord) that is `'mention'`, and the Chat SDK
+   bridge promotes a **reply to the bot** to a mention too, so "@it or reply to
+   it" engages while people talking to each other in the topic do not. A topic
+   holds only one *agent*, but it is still a shared conversation between
+   *humans*, which is why it is not wired always-on. Plus
    `ignored_message_policy: 'drop'`, `session_mode: 'shared'`, and
    `sender_scope` **inherited from the concierge's own wiring** (fallback
    `'known'`). The two gates are independent: on a `'public'` messaging group
@@ -127,7 +133,11 @@ first thing, summarize the runbook Dana posted."*
     `send_message` to its own child is dropped as *unknown destination*.
 12. **Replay.** The `brief` is routed into the new topic with `routeInbound`,
     as the install owner's identity (see below), so the new agent's first turn
-    already carries the request instead of starting cold.
+    already carries the request instead of starting cold. It is sent with
+    `isMention: true` — **coupled to step 9**: under a mention-mode wiring a
+    synthetic replay carries no platform mention signal, so without the flag
+    the brief routes, is judged not-addressed, and the brand-new agent never
+    wakes on the request it was spawned for.
 13. **Report.** The concierge is notified: the destination name to use, and
     that anyone in the chat can now talk to the new agent in its topic.
 
