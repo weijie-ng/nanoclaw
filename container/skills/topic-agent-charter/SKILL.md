@@ -119,10 +119,13 @@ Dana is away from 20 August.
 
 ## Working agreement
 Track decisions, blockers, and owners in memory. Before reporting, re-read the
-key results and say which one moved. When Q1 or Q2 starts blocking real work,
-ask the owner named above rather than deciding it yourself.
+key results and say which one moved. Treat them as your done-condition, and cap
+the loop at three attempts unless the task sets its own; at the cap, report the
+partial and what is still open rather than stopping quietly. When Q1 or Q2
+starts blocking real work, ask the owner named above rather than deciding it
+yourself.
 `.trim(),
-  brief: "Summarise Dana's runbook and flag any step without a clear owner. Save the charter above into memory as the thing you check your work against."
+  brief: "Summarise Dana's runbook and flag any step without a clear owner."
 })
 ```
 
