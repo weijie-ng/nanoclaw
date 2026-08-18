@@ -26,6 +26,7 @@ import {
   markDelivered,
   markDeliveryFailed,
   migrateDeliveredTable,
+  getPlatformMessageId,
 } from './db/session-db.js';
 import { runGuarded, type DeliveryGuardSpec, type GuardedDeliveryHandler } from './delivery-guard.js';
 import { isUnguarded, type Unguarded } from './guard/index.js';
@@ -249,6 +250,36 @@ async function drainSession(session: Session): Promise<void> {
   }
 }
 
+/**
+ * Rewrite an operation's target from an internal message id to the platform id
+ * it was delivered as.
+ *
+ * `edit` / `delete` / `reaction` / `pin` all target a message by platform id.
+ * The container resolves that itself when it can, but a message the agent sent
+ * moments ago has no platform id yet — the host only learns it on delivery —
+ * so getMessageIdBySeq hands back the internal `msg-*` id instead. Resolving
+ * it HERE is what makes "send a file, then pin it" deterministic rather than a
+ * race against the delivery poll: the drain is ordered and the target was
+ * queued first, so by the time this op is delivered its target is in
+ * `delivered` with a platform id.
+ *
+ * Pure so the ordering contract is testable without two session DBs; the
+ * caller supplies the lookup. No platform id throws, because a pin against a
+ * message nobody can see is a bug worth surfacing, not a silent no-op.
+ */
+export function resolveTargetMessageId(
+  content: Record<string, unknown>,
+  lookup: (messageOutId: string) => string | null,
+): void {
+  const target = content.messageId;
+  if (typeof target !== 'string' || !target.startsWith('msg-')) return;
+  const platformId = lookup(target);
+  if (!platformId) {
+    throw new Error(`Cannot target message ${target}: it was never delivered, so it has no platform id`);
+  }
+  content.messageId = platformId;
+}
+
 async function deliverMessage(
   msg: {
     id: string;
@@ -268,6 +299,10 @@ async function deliverMessage(
   }
 
   const content = JSON.parse(msg.content);
+
+  // An op targeting a message this agent sent itself carries the internal id
+  // until the host knows the platform one. See resolveTargetMessageId.
+  resolveTargetMessageId(content, (outId) => getPlatformMessageId(inDb, outId));
 
   // System actions — handle internally (cli_request, etc.)
   if (msg.kind === 'system') {

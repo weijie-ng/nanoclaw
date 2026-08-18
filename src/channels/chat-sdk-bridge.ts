@@ -25,6 +25,7 @@ import { registerWebhookAdapter } from '../webhook-server.js';
 import { normalizeOptions, type NormalizedOption } from './ask-question.js';
 import type { ChannelAdapter, ChannelDefaults, ChannelSetup, InboundMessage } from './adapter.js';
 import { resolveQuestionRender } from './question-render-registry.js';
+import { pinTelegramMessage } from './telegram-pin.js';
 
 /** Adapter with optional gateway support (e.g., Discord). */
 interface GatewayAdapter extends Adapter {
@@ -549,6 +550,21 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
 
       if (content.operation === 'reaction' && content.messageId && content.emoji) {
         await adapter.addReaction(tid, content.messageId as string, content.emoji as string);
+        return;
+      }
+
+      // Pin / unpin. Dispatches on the PLATFORM, not on a method, because the
+      // Chat SDK's Adapter interface has no pin at all — there is nothing to
+      // feature-detect. Telegram-only for now; every other adapter degrades to
+      // the same warn-and-drop the delete path gets above. The implementation
+      // is trunk-owned (src/channels/telegram-pin.ts) so a `/add-telegram`
+      // re-apply cannot take pinning with it.
+      if (content.operation === 'pin' && content.messageId) {
+        if (adapter.name !== 'telegram') {
+          log.warn('Adapter does not support pinning — dropping pin', { adapter: adapter.name });
+          return;
+        }
+        await pinTelegramMessage(tid, content.messageId as string, content.unpin === true);
         return;
       }
 

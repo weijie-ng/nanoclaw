@@ -79,12 +79,17 @@ If the exchange has been long, say what you assumed rather than burying it: "Two
 
 The charter goes into `instructions`, because it must be true on every future turn. Today's request goes into `brief`, because it happens once. Collapsing the two is the classic error: a brief in `instructions` makes the agent redo today's task forever, a role in `brief` gives it a personality for exactly one turn.
 
-Add two standing habits to `instructions` so the charter stays live rather than becoming a decorative preamble:
+Add three standing habits to `instructions` so the charter stays live rather than becoming a decorative preamble:
 
 - Re-read the key results before reporting, and say which one the work moved.
 - When an open question starts blocking real work, ask the named owner. Do not settle it silently.
+- Keep the charter pinned in the topic, as the standing-instructions file itself.
 
 The second is what converts recorded debt into paid debt. Without it the ledger is just a nicer way of writing down the same guess.
+
+The third makes the charter the first thing anyone opening the topic sees, rather than a preamble buried in a container nobody can read. What gets pinned is `instructions.prepend.md` — the file `instructions` is written to at spawn (`/workspace/agent/instructions.prepend.md` inside the container), not a copy of it. A copy is worse than no pin at all: it drifts the moment either side is edited, and the stale one is the one that looks authoritative.
+
+On Telegram this needs the bot to hold `can_pin_messages` in the supergroup — `spawn_topic_agent` only requires `can_manage_topics`, so pinning can fail in a chat where topic creation works. If it does, the child says so and leaves the file sent but unpinned.
 
 ```
 spawn_topic_agent({
@@ -124,6 +129,14 @@ the loop at three attempts unless the task sets its own; at the cap, report the
 partial and what is still open rather than stopping quietly. When Q1 or Q2
 starts blocking real work, ask the owner named above rather than deciding it
 yourself.
+
+Your charter is `instructions.prepend.md` — the file that makes you who you
+are on every turn. On your first turn, send it into this topic with
+`send_file({ path: "instructions.prepend.md", filename: "okr.md" })` and pin
+the result with `pin_message` (`send_file` returns the message id to pass).
+When a key result, constraint, or open question changes, edit that file, then
+re-send and re-pin. Never keep a second copy of the charter: the pinned
+message is the file itself.
 `.trim(),
   brief: "Summarise Dana's runbook and flag any step without a clear owner."
 })
