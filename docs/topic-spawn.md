@@ -102,9 +102,12 @@ first thing, summarize the runbook Dana posted."*
    point on every write is unconditional; nothing is rolled back.
 7. **Agent group.** New `agent_groups` row, folder deduplicated against
    `agent_groups.folder`, filesystem scaffolded with `instructions` as
-   `instructions.prepend.md`. The child inherits its parent's *effective*
-   provider, never the instance-wide default, so it is never spawned on a
-   runtime this install can't reach.
+   `instructions.prepend.md` — prefixed with a channel-agnostic identity
+   preamble (`TOPIC_AGENT_IDENTITY_PREAMBLE` in `spawn.ts`), always, even for a
+   bare spawn with no `instructions`, so a topic agent never disowns a mention
+   in its own topic (see [Limits and sharp edges](#limits-and-sharp-edges)). The
+   child inherits its parent's *effective* provider, never the instance-wide
+   default, so it is never spawned on a runtime this install can't reach.
 8. **Messaging group.** The 3-part `platform_id` from step 6, `is_group: 1`,
    `instance` copied from the parent, `unknown_sender_policy` **inherited from
    the parent chat**.
@@ -308,3 +311,17 @@ engage mode, or add members exactly as you would for any chat.
   (`mcp-tools/topics.instructions.md`) tells the agent to confirm with the user
   before spawning unless the request is unambiguous, but that is guidance, not
   a limit.
+- **One bot fronts every topic agent, so identity is ambiguous by default.**
+  There is one platform bot per instance; inside a spawned topic that same bot
+  *is* the child, but its handle is whatever the install named it — usually
+  after the concierge that spawned it. The engage model makes this unavoidable:
+  a topic agent is `'mention'`-wired (step 9), so the only way to reach it is to
+  @mention that shared handle or reply to the bot — the very handle the child
+  may read as belonging to the concierge, concluding the message is not for it
+  and staying silent in its own topic. Routing is fine (the mention engages the
+  child correctly); *identity* is what fails. `TOPIC_AGENT_IDENTITY_PREAMBLE`
+  (step 7) is the mitigation — it tells the child that in its own topic the
+  shared bot is it, so a mention there is addressed to it whatever the handle is
+  named after. It is a persona clause, not an enforced rule: if that proves too
+  soft, the adapter-level precedent is the shared-identity pattern in
+  [setup-wiring.md](setup-wiring.md) (WhatsApp shared-number mode).

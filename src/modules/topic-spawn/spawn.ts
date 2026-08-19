@@ -47,6 +47,23 @@ import { notifyAgent, requestApproval } from '../approvals/index.js';
 import { addMember, getMembers } from '../permissions/db/agent-group-members.js';
 import { getOwners } from '../permissions/db/user-roles.js';
 
+/**
+ * Prepended to every topic agent's charter at creation. A topic agent shares
+ * one bot with the agent that spawned it, so a mention of the bot handle in its
+ * own topic otherwise reads as being for whoever the handle is named after, and
+ * the child stands aside in its own topic. Kept channel-agnostic: the concrete
+ * bot handle is a per-adapter fact this seam doesn't hold, and the rule holds
+ * without naming it.
+ */
+export const TOPIC_AGENT_IDENTITY_PREAMBLE = [
+  '**You are this topic.** This install may run one shared bot in front of several',
+  'agents. Inside your own topic that bot is you, not the agent that spawned you',
+  'and not any sibling the same bot also fronts. A message here that @-mentions the',
+  'bot handle is addressed to you, even when the handle is named after another',
+  "agent. What identifies you is the topic you are in, not the bot's name, so never",
+  'read a mention in your own topic as being for someone else and stand aside.',
+].join('\n');
+
 /** The three fields a `spawn_topic_agent` system row carries. */
 interface SpawnRequest {
   /** Display name of both the new topic and the new agent group. */
@@ -278,7 +295,13 @@ async function performSpawnTopicAgent(
   // never spawned on a runtime this install can't reach.
   const parentConfig = getContainerConfig(sourceGroup.id);
   const parentProvider = parentConfig?.provider ?? 'claude';
-  initGroupFilesystem(newGroup, { instructions: instructions || undefined, provider: parentProvider });
+  // Prepend the shared-bot identity clause (see TOPIC_AGENT_IDENTITY_PREAMBLE)
+  // so every topic agent, even a bare spawn with no instructions, knows the
+  // shared bot is it.
+  const effectiveInstructions = instructions
+    ? `${TOPIC_AGENT_IDENTITY_PREAMBLE}\n\n${instructions}`
+    : TOPIC_AGENT_IDENTITY_PREAMBLE;
+  initGroupFilesystem(newGroup, { instructions: effectiveInstructions, provider: parentProvider });
 
   // Model inheritance, for the same reason as the provider above: an install
   // whose gateway only serves a fixed model list (a LiteLLM key's `models`

@@ -28,6 +28,8 @@ Draft before you ask. This is the whole trick over a messaging channel. "What ar
 
 Six sections. This is the structure you fill in and the structure that goes into `instructions`.
 
+Spawn prepends one thing you do not write: a shared-bot identity clause, telling the child that inside its own topic the shared bot is *it*, so a mention there is addressed to it even when the handle is named after the agent that spawned it. It is always added at creation, so leave identity out of your charter and start at Problem.
+
 **Problem** - what is wrong now, and for whom. Present tense, current state, no solution in it. If you cannot name who is hurting, you probably have a task rather than a problem, and a task does not need its own agent.
 
 **Objective** - the qualitative, directional change wanted. One sentence, no numbers. It should still read as the point of the thing in three months.

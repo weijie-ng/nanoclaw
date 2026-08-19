@@ -370,10 +370,13 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
     expect(mockCreateAgentGroup).toHaveBeenCalledTimes(1);
     const newGroup = mockCreateAgentGroup.mock.calls[0][0] as { id: string; name: string; folder: string };
     expect(newGroup.name).toBe('Trip planning');
-    expect(mockInitGroupFilesystem).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ instructions: 'plan the trip' }),
-    );
+    // The authored charter is prefixed with the shared-bot identity preamble
+    // (always, so a topic agent never disowns a mention in its own topic), so
+    // the written instructions carry both, preamble first.
+    const initInstructions = (mockInitGroupFilesystem.mock.calls[0][1] as { instructions: string }).instructions;
+    expect(initInstructions).toContain('You are this topic');
+    expect(initInstructions).toContain('plan the trip');
+    expect(initInstructions.indexOf('You are this topic')).toBeLessThan(initInstructions.indexOf('plan the trip'));
 
     // The topic is its own messaging group, addressed by the 3-part
     // platform_id the adapter returned.
@@ -531,7 +534,7 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
 
     expect(mockInitGroupFilesystem).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ instructions: 'book flights' }),
+      expect.objectContaining({ instructions: expect.stringContaining('book flights') }),
     );
   });
 
@@ -551,10 +554,11 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
 
     expect(mockCreateThread).toHaveBeenCalledWith('telegram:-1001', 'Reading Group');
     expect(mockCreateAgentGroup).toHaveBeenCalledTimes(1);
-    // No brief to fall back to → no standing instructions, and no replay.
+    // No brief to fall back to → the charter is the identity preamble alone
+    // (still written, so even a bare spawn owns mentions in its own topic).
     expect(mockInitGroupFilesystem).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ instructions: undefined }),
+      expect.objectContaining({ instructions: expect.stringContaining('You are this topic') }),
     );
     expect(mockRouteInbound).not.toHaveBeenCalled();
   });
@@ -564,8 +568,16 @@ describe('spawn_topic_agent — what a successful spawn writes', () => {
 
     expect(mockInitGroupFilesystem).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ instructions: 'book flights' }),
+      expect.objectContaining({ instructions: expect.stringContaining('book flights') }),
     );
+  });
+
+  it('always prepends the shared-bot identity preamble, even with no brief and no instructions', async () => {
+    await runSpawn({ name: 'Reading Group', instructions: null, brief: null });
+
+    const initInstructions = (mockInitGroupFilesystem.mock.calls[0][1] as { instructions?: string }).instructions;
+    expect(initInstructions).toContain('You are this topic');
+    expect(initInstructions).toContain('@-mentions the');
   });
 
   it('a failed replay leaves the topic wired and says so', async () => {
