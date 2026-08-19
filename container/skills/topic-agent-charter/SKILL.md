@@ -98,10 +98,10 @@ On Telegram this needs the bot to hold `can_pin_messages` in the supergroup — 
 Three more things happen on the child's first turn, and they only happen if the working agreement says so:
 
 - **Plan before working.** The child runs the `planner` subagent on the charter's objective and key results. Planner decides the shape — inline work, a single subagent, or a fan-out that `assignment-loop` executes — and returns the plan as text. The child saves it verbatim to `plans/<date>-<slug>.md` before acting on it.
-- **Fan-outs get approved as a picture.** If the plan runs more than one unit in parallel, the child redraws the plan's Fan-out mermaid block with `diagram-design`, exports it as a PNG, sends it into the topic with `send_file`, and starts on a yes. A sequential or inline plan needs no approval round — say the shape in one line and go.
+- **Fan-outs get approved as a picture.** If the plan runs more than one unit in parallel, the child renders the plan's Fan-out mermaid block to a PNG with `diagram-design` and sends it into the topic with `send_file`, then starts on a yes. This is a multi-step path, not a one-shot command: `mermaid_extract.py` to read the block, redraw it per the skill, then `references/export.md` to screenshot the SVG node (Chromium is preinstalled, nothing is downloaded). Budget for it. A sequential or inline plan needs no approval round — say the shape in one line and go.
 - **Schedules are self-service.** If the ask has a cadence, the child creates its own task (`ncl tasks create --recurrence <cron>`) on its first turn. You cannot pre-load a schedule into the child's group: `ncl tasks create` always targets the calling group, whatever `--group` says. So put the cadence in the charter, and the working agreement tells the child to schedule itself.
 
-Give the child one workspace layout it repeats for every task: `plans/` for every plan planner returns, `output/` for deliverables, `output/.verify/` for the evidence its done-condition check produced. The child preloads it on its first turn with `python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py <type ...>` (run from `/workspace/agent`; idempotent, never touches existing files), passing the deliverable type(s) the charter names — `report`, `presentation` (or `pptx`), `infographic`, `html` — which seeds a matching skeleton under `output/.template/`. No type, no template: folders only. There is no spec folder — the charter in `instructions.prepend.md` *is* the spec, and a spec beside it would be the drifting second copy the pinning rule forbids.
+Give the child one workspace layout it repeats for every task: `plans/` for every plan planner returns, `outputs/` for deliverables, `outputs/.verify/` for the evidence its done-condition check produced, and `.templates/` for the copy-me deliverable skeletons and any report tooling it reuses. The child preloads it on its first turn with `python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py <type ...>` (run from `/workspace/agent`; idempotent, never touches existing files), passing the deliverable type(s) the charter names — `report`, `presentation` (or `pptx`), `infographic`, `html` — which seeds a matching skeleton under `.templates/`. No type, no template: folders only. There is no spec folder — the charter in `instructions.prepend.md` *is* the spec, and a spec beside it would be the drifting second copy the pinning rule forbids.
 
 ```
 spawn_topic_agent({
@@ -139,11 +139,12 @@ On your first turn, preload your workspace with
 `python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py report`
 from `/workspace/agent` (the weekly status is a report). Then, and again whenever a new assignment lands, run the
 `planner` subagent on this charter and save the plan it returns to
-`plans/<date>-<slug>.md`. If the plan runs units in parallel, export its
-fan-out diagram as a PNG with `diagram-design`, send it here, and start on a
-yes; otherwise say the shape in one line and go. Keep deliverables in
-`output/` and the evidence your done-condition check produced in
-`output/.verify/`. Schedule KR3 yourself on your first turn:
+`plans/<date>-<slug>.md`. If the plan runs units in parallel, render its
+fan-out mermaid to a PNG with `diagram-design` (`mermaid_extract.py` → redraw →
+`references/export.md`), send it here with `send_file`, and start on a yes;
+otherwise say the shape in one line and go. Keep deliverables in
+`outputs/` and the evidence your done-condition check produced in
+`outputs/.verify/`. Schedule KR3 yourself on your first turn:
 `ncl tasks create --recurrence "0 9 * * 1" ...`.
 
 Track decisions, blockers, and owners in memory. Before reporting, re-read the

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Preload a topic agent's workspace: plans/, output/, output/.verify/, and
-deliverable templates under output/.template/. Idempotent — existing files are
+"""Preload a topic agent's workspace: plans/, outputs/, outputs/.verify/, and
+deliverable templates under .templates/. Idempotent — existing files are
 never touched. Run from /workspace/agent:
 
     python3 preload_workspace.py [report] [presentation|pptx] [infographic]
@@ -25,7 +25,7 @@ Key result moved: KR<n> — <how the number moved>
 
 ## Verification
 <what the done-condition check was, and where its evidence lives under
-output/.verify/>
+outputs/.verify/>
 
 ## Open items
 <what is unresolved, who owns it>
@@ -33,7 +33,7 @@ output/.verify/>
     "presentation": """# <Deck title>
 
 Format: .pptx via the `pptx` skill, or HTML via `frontend-slides` — the
-charter's constraints decide. Build into output/, keep this outline here.
+charter's constraints decide. Build into outputs/, keep this outline here.
 Key result moved: KR<n>
 
 ## Slide 1 — title
@@ -47,7 +47,7 @@ Key result moved: KR<n>
 """,
     "infographic": """# <Infographic title>
 
-One page, one message. Build with `diagram-design` (export PNG to output/).
+One page, one message. Build with `diagram-design` (export PNG to outputs/).
 Key result moved: KR<n>
 
 ## Headline
@@ -61,7 +61,7 @@ Key result moved: KR<n>
 """,
     "html": """# <Page title>
 
-One self-contained .html file in output/, built with `frontend-engineer`.
+One self-contained .html file in outputs/, built with `frontend-engineer`.
 The user cannot open your filesystem: deliver it with `send_file`.
 Key result moved: KR<n>
 
@@ -78,21 +78,21 @@ Key result moved: KR<n>
 TEMPLATES["pptx"] = TEMPLATES["presentation"]
 
 root = Path.cwd()
-for d in ("plans", "output", "output/.verify", "output/.template"):
+for d in ("plans", "outputs", "outputs/.verify", ".templates"):
     (root / d).mkdir(parents=True, exist_ok=True)
 
 made, kept = [], []
 for t in sys.argv[1:]:
     if t not in TEMPLATES:
         sys.exit(f"unknown template '{t}' — choose from: {', '.join(sorted(TEMPLATES))}")
-    dest = root / "output" / ".template" / f"{'presentation' if t == 'pptx' else t}.md"
+    dest = root / ".templates" / f"{'presentation' if t == 'pptx' else t}.md"
     if dest.exists():
         kept.append(dest.name)
     else:
         dest.write_text(TEMPLATES[t])
         made.append(dest.name)
 
-msg = f"workspace ready at {root}: plans/ output/ output/.verify/ output/.template/"
+msg = f"workspace ready at {root}: plans/ outputs/ outputs/.verify/ .templates/"
 if made:
     msg += f" — seeded {', '.join(made)}"
 if kept:
