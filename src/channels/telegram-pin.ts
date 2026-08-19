@@ -33,11 +33,22 @@ export async function pinTelegramMessage(threadId: string, messageId: string, un
   const token = readEnvFile(['TELEGRAM_BOT_TOKEN']).TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error('Cannot pin: TELEGRAM_BOT_TOKEN is not set');
 
+  // The container hands us the composite platform id (`<chatId>:<messageId>`) —
+  // the same shape edit/react/delete pass to the branch adapter, which decodes
+  // it. pinChatMessage wants the bare integer, so take the numeric tail (a bare
+  // id from an older caller or a test still works). `Number('<chat>:<id>')` is
+  // NaN, which Telegram rejects as "message to pin not found".
+  const rawId = messageId.includes(':') ? messageId.slice(messageId.lastIndexOf(':') + 1) : messageId;
+  const numericId = Number(rawId);
+  if (!Number.isInteger(numericId)) {
+    throw new Error(`Cannot pin: "${messageId}" has no numeric message id`);
+  }
+
   const method = unpin ? 'unpinChatMessage' : 'pinChatMessage';
   const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, message_id: Number(messageId) }),
+    body: JSON.stringify({ chat_id: chatId, message_id: numericId }),
   });
   const data = (await res.json()) as { ok?: boolean; description?: string };
   if (data.ok !== true) {

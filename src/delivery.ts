@@ -23,6 +23,7 @@ import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-g
 import {
   getDueOutboundMessages,
   getDeliveredIds,
+  insertMessage,
   markDelivered,
   markDeliveryFailed,
   migrateDeliveredTable,
@@ -233,6 +234,7 @@ async function drainSession(session: Session): Promise<void> {
           });
           markDeliveryFailed(inDb, msg.id);
           deliveryAttempts.delete(msg.id);
+          notifyOpFailure(inDb, msg, err);
         } else {
           log.warn('Message delivery failed, will retry', {
             messageId: msg.id,
@@ -278,6 +280,52 @@ export function resolveTargetMessageId(
     throw new Error(`Cannot target message ${target}: it was never delivered, so it has no platform id`);
   }
   content.messageId = platformId;
+}
+
+/**
+ * Tell the child when one of its queued ops failed for good.
+ *
+ * pin / edit / reaction / delete return "queued" from the tool call and carry
+ * no outcome back — the agent reports success and never learns otherwise, so a
+ * permanent failure (a missing pin right, a deleted target) lives only in the
+ * host log. On give-up, drop a `system` row into the child's inbox so its next
+ * turn sees it, rendered as `<system_response action="pin" status="failed">`.
+ * `trigger: 0` — context only, no wake, so it rides along on the next natural
+ * turn without spawning a container just to deliver bad news.
+ *
+ * Scoped to ops (`content.operation`): a failed chat/file send is a different
+ * case, and re-surfacing those risks a resend loop. A note that itself failed
+ * to serialize is swallowed — this is best-effort visibility, not a new
+ * failure surface.
+ */
+export function notifyOpFailure(inDb: Database.Database, msg: { id: string; content: string }, err: unknown): void {
+  let operation: unknown;
+  try {
+    operation = (JSON.parse(msg.content) as { operation?: unknown }).operation;
+  } catch {
+    return;
+  }
+  if (typeof operation !== 'string') return;
+  try {
+    insertMessage(inDb, {
+      id: `opfail-${msg.id}`,
+      kind: 'system',
+      timestamp: new Date().toISOString(),
+      platformId: null,
+      channelType: null,
+      threadId: null,
+      content: JSON.stringify({
+        action: operation,
+        status: 'failed',
+        result: err instanceof Error ? err.message : String(err),
+      }),
+      processAfter: null,
+      recurrence: null,
+      trigger: 0,
+    });
+  } catch (noteErr) {
+    log.warn('Could not write op-failure note to inbox', { messageId: msg.id, err: noteErr });
+  }
 }
 
 async function deliverMessage(
