@@ -73,6 +73,15 @@ Key result moved: KR<n>
 
 ## Interactions
 <what is clickable, filterable, or sortable — or "static" if nothing>
+
+## Recurring? Build it data-driven, once
+If this page is rebuilt on a cadence (a digest, dashboard, or standing report),
+do NOT regenerate the HTML each cycle. Build the template ONCE: a fixed render
+script plus a single `const DATA = {...}` object. Each cycle you edit only DATA;
+the script draws every card/row/stat/heatmap cell from it, and counts, ordering
+and filters are COMPUTED from DATA, never tallied by hand. Hand-writing each
+item is what makes a build run for many minutes and trip the API request
+timeout (~10 min per request); emitting a small data object does not.
 """,
 }
 TEMPLATES["pptx"] = TEMPLATES["presentation"]
