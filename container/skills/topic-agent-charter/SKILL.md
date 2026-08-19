@@ -1,6 +1,6 @@
 ---
 name: topic-agent-charter
-description: Interviews the user and writes a Problem Statement plus Objective and Key Results (OKRs) before a new standing agent is created, so the agent's purpose is stated, measurable, and its unresolved assumptions are written down rather than silently guessed. Use this whenever someone asks for a new agent, a new topic, or a dedicated place for a piece of work — "make a topic for the Q3 migration", "spin up something to track this", "can we get a channel for the client", "watch the deploy pipeline and tell me when it breaks", "I want an agent that keeps up with papers on retrieval" — and use it before calling spawn_topic_agent or create_agent, not after. Use it especially when the request is vague, ambitious, or open-ended, since that is exactly when the charter is doing the most work. Also use it when the user asks to review, sharpen, or rewrite an existing agent's brief, objective, key results, or standing instructions.
+description: Interviews the user and writes a Problem Statement plus Objective and Key Results (OKRs) before a new standing agent is created, so the agent's purpose is stated, measurable, and its unresolved assumptions are written down rather than silently guessed. Use when someone asks for a new agent, a new topic, or a dedicated place for a piece of work — "make a topic for the Q3 migration", "spin up something to track this", "can we get a channel for the client", "watch the deploy pipeline and tell me when it breaks", "I want an agent that keeps up with papers on retrieval" — and use it before calling spawn_topic_agent or create_agent, not after, and before multi-agent-design, which then decides the shape. Use it especially when the request is vague, ambitious, or open-ended, since that is exactly when the charter is doing the most work. Also use it when the user asks to review, sharpen, or rewrite an existing agent's brief, objective, key results, or standing instructions.
 ---
 
 # Topic Agent Charter
@@ -91,6 +91,16 @@ The third makes the charter the first thing anyone opening the topic sees, rathe
 
 On Telegram this needs the bot to hold `can_pin_messages` in the supergroup — `spawn_topic_agent` only requires `can_manage_topics`, so pinning can fail in a chat where topic creation works. If it does, the child says so and leaves the file sent but unpinned.
 
+### The child's first turn
+
+Three more things happen on the child's first turn, and they only happen if the working agreement says so:
+
+- **Plan before working.** The child runs the `planner` subagent on the charter's objective and key results. Planner decides the shape — inline work, a single subagent, or a fan-out that `assignment-loop` executes — and returns the plan as text. The child saves it verbatim to `plans/<date>-<slug>.md` before acting on it.
+- **Fan-outs get approved as a picture.** If the plan runs more than one unit in parallel, the child redraws the plan's Fan-out mermaid block with `diagram-design`, exports it as a PNG, sends it into the topic with `send_file`, and starts on a yes. A sequential or inline plan needs no approval round — say the shape in one line and go.
+- **Schedules are self-service.** If the ask has a cadence, the child creates its own task (`ncl tasks create --recurrence <cron>`) on its first turn. You cannot pre-load a schedule into the child's group: `ncl tasks create` always targets the calling group, whatever `--group` says. So put the cadence in the charter, and the working agreement tells the child to schedule itself.
+
+Give the child one workspace layout it repeats for every task: `plans/` for every plan planner returns, `output/` for deliverables, `output/.verify/` for the evidence its done-condition check produced. The child preloads it on its first turn with `python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py <type ...>` (run from `/workspace/agent`; idempotent, never touches existing files), passing the deliverable type(s) the charter names — `report`, `presentation` (or `pptx`), `infographic`, `html` — which seeds a matching skeleton under `output/.template/`. No type, no template: folders only. There is no spec folder — the charter in `instructions.prepend.md` *is* the spec, and a spec beside it would be the drifting second copy the pinning rule forbids.
+
 ```
 spawn_topic_agent({
   name: "Q3 Migration",
@@ -123,6 +133,17 @@ Dana is away from 20 August.
 - Q2: Whether staging failures count as blockers. Assuming yes. Owner: Ops.
 
 ## Working agreement
+On your first turn, preload your workspace with
+`python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py report`
+from `/workspace/agent` (the weekly status is a report). Then, and again whenever a new assignment lands, run the
+`planner` subagent on this charter and save the plan it returns to
+`plans/<date>-<slug>.md`. If the plan runs units in parallel, export its
+fan-out diagram as a PNG with `diagram-design`, send it here, and start on a
+yes; otherwise say the shape in one line and go. Keep deliverables in
+`output/` and the evidence your done-condition check produced in
+`output/.verify/`. Schedule KR3 yourself on your first turn:
+`ncl tasks create --recurrence "0 9 * * 1" ...`.
+
 Track decisions, blockers, and owners in memory. Before reporting, re-read the
 key results and say which one moved. Treat them as your done-condition, and cap
 the loop at three attempts unless the task sets its own; at the cap, report the
