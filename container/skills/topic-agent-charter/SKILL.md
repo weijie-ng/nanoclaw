@@ -95,11 +95,11 @@ On Telegram this needs the bot to hold `can_pin_messages` in the supergroup — 
 
 ### The child's first turn
 
-Three more things happen on the child's first turn, and they only happen if the working agreement says so:
+More happens on the child's first turn, and it splits two ways. The genuinely **one-time** setup — preload the workspace, create the schedule, send and pin the charter — belongs in the `brief`, which is delivered once. Never put setup in `instructions`: it is re-read every turn, so a setup step there re-fires forever — that is how a child creates a duplicate scheduled task or re-pins its charter every cycle. What belongs in `instructions` is the standing *habits*: plan each new assignment, keep the deliverable data-driven, re-read the key results before reporting, re-pin the charter only when it changes. The rest of this section covers both:
 
-- **Plan before working.** The child runs the `planner` subagent on the charter's objective and key results. Planner decides the shape — inline work, a single subagent, or a fan-out that `assignment-loop` executes — and returns the plan as text. The child saves it verbatim to `plans/<date>-<slug>.md` before acting on it.
+- **Plan before working; for a recurring deliverable, plan once into a fixed file and gate on it.** The child runs the `planner` subagent on the charter's objective and key results. Planner decides the shape — inline work, a single subagent, or a fan-out that `assignment-loop` executes — and returns the plan as text, which the child saves verbatim before acting on it. For a **one-off** assignment that plan is a date-stamped `plans/<date>-<slug>.md` — a fresh planner pass each time. For the **recurring** deliverable the plan must be *checkable*, not merely "remembered as stable": it lives at one fixed path (`plans/<deliverable>.md`), and every cycle is gated on that file — **absent → this is cycle one: run `planner`, save it there, then execute; present → read it and follow it, do not re-run `planner`.** Re-plan (overwrite the file) only when scope, deliverable, or cadence changes, noting the change at its top. State this gate explicitly in the charter's working agreement, naming the file. Without a fixed file the reuse rule has nothing to check, so the child either re-plans every cycle or — seen in the wild — skips `planner` entirely and improvises a different shape each run, leaving `plans/` empty. The saved plan is what holds every cycle to the same shape; that consistency *is* the recurring deliverable's reliability.
 - **Fan-outs get approved as a picture.** If the plan runs more than one unit in parallel, the child renders the plan's Fan-out mermaid block to a PNG with `diagram-design` and sends it into the topic with `send_file`, then starts on a yes. This is a multi-step path, not a one-shot command: `mermaid_extract.py` to read the block, redraw it per the skill, then `references/export.md` to screenshot the SVG node (Chromium is preinstalled, nothing is downloaded). Budget for it. A sequential or inline plan needs no approval round — say the shape in one line and go.
-- **Schedules are self-service.** If the ask has a cadence, the child creates its own task (`ncl tasks create --recurrence <cron>`) on its first turn. You cannot pre-load a schedule into the child's group: `ncl tasks create` always targets the calling group, whatever `--group` says. So put the cadence in the charter, and the working agreement tells the child to schedule itself. **Cron is interpreted in the install (or group-override) timezone, never UTC.** Write the cron in local wall-clock time and never "helpfully" convert to UTC: for 09:00 in a Singapore install the cron is `0 9 …`, not `0 1 …`. A UTC conversion in the charter is the commonest scheduling bug — the digest fires hours off and nobody notices until the wrong-time delivery lands.
+- **Schedules are self-service, and created idempotently.** If the ask has a cadence, the child creates its own task on its first turn. You cannot pre-load a schedule into the child's group: `ncl tasks create` always targets the calling group, whatever `--group` says. Put the cadence in the charter and have the `brief` tell the child to schedule itself — but guard it: `ncl tasks create` keys the task on `<name-slug>-<4hex>` and never dedupes, so a second call creates a *duplicate* that double-fires the deliverable forever. The brief must say: run `ncl tasks list` first and create only if none exists. **Cron is interpreted in the install (or group-override) timezone, never UTC.** Write the cron in local wall-clock time and never "helpfully" convert to UTC: for 09:00 in a Singapore install the cron is `0 9 …`, not `0 1 …`. A UTC conversion is the commonest scheduling bug — the digest fires hours off and nobody notices until the wrong-time delivery lands. A prohibition alone does not hold (agents convert by reflex), so the brief must also verify: after creating, run `ncl tasks get` and confirm the next run shows the intended local hour; if not, it was converted — recreate with the literal cron.
 - **A recurring deliverable is built data-driven, once.** If the charter's deliverable is a file regenerated on a cadence — a digest, a dashboard, a standing report — the biggest failure mode is the child hand-writing the whole artefact every cycle. A large HTML build (tens of KB of cards/rows emitted token by token) runs many minutes and trips the API request timeout (~10 min per request), and it is slow every single cycle. Say so in the charter's deliverable format: build the template **once** as a fixed render script over a single `DATA` object, and each cycle refill **only** `DATA` — counts, ordering and filters computed from it, never tallied by hand. The recurring workload also belongs in the scheduled task, not an inline reply; a "run it now" should trigger that task, not a 15-minute turn the user waits on.
 
 Give the child one workspace layout it repeats for every task: `plans/` for every plan planner returns, `outputs/` for deliverables, `outputs/.verify/` for the evidence its done-condition check produced, and `.templates/` for the copy-me deliverable skeletons and any report tooling it reuses. The child preloads it on its first turn with `python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py <type ...>` (run from `/workspace/agent`; idempotent, never touches existing files), passing the deliverable type(s) the charter names — `report`, `presentation` (or `pptx`), `infographic`, `html` — which seeds a matching skeleton under `.templates/`. No type, no template: folders only. There is no spec folder — the charter in `instructions.prepend.md` *is* the spec, and a spec beside it would be the drifting second copy the pinning rule forbids.
@@ -136,17 +136,18 @@ Dana is away from 20 August.
 - Q2: Whether staging failures count as blockers. Assuming yes. Owner: Ops.
 
 ## Working agreement
-On your first turn, preload your workspace with
-`python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py report`
-from `/workspace/agent` (the weekly status is a report). Then, and again whenever a new assignment lands, run the
-`planner` subagent on this charter and save the plan it returns to
-`plans/<date>-<slug>.md`. If the plan runs units in parallel, render its
-fan-out mermaid to a PNG with `diagram-design` (`mermaid_extract.py` → redraw →
-`references/export.md`), send it here with `send_file`, and start on a yes;
-otherwise say the shape in one line and go. Keep deliverables in
-`outputs/` and the evidence your done-condition check produced in
-`outputs/.verify/`. Schedule KR3 yourself on your first turn:
-`ncl tasks create --recurrence "0 9 * * 1" ...`.
+The weekly status is recurring, so it runs from one saved plan and each Monday
+has the same shape. That plan lives at a fixed path, `plans/weekly-status.md`,
+and each run is gated on it: if the file is missing this is the first cycle —
+run the `planner` subagent on this charter, save the plan there, then execute;
+if it exists, follow it and do not re-run `planner`. Re-plan (overwrite it) only
+when a key result, the deliverable, or the cadence changes. Any one-off
+assignment beyond the weekly status gets its own fresh `plans/<date>-<slug>.md`.
+If a plan runs units in parallel, render its fan-out mermaid to a PNG with
+`diagram-design` (`mermaid_extract.py` → redraw → `references/export.md`), send
+it here with `send_file`, and start on a yes; otherwise say the shape in one
+line and go. Keep deliverables in `outputs/` and the evidence your
+done-condition check produced in `outputs/.verify/`.
 
 Track decisions, blockers, and owners in memory. Before reporting, re-read the
 key results and say which one moved. Treat them as your done-condition, and cap
@@ -156,14 +157,22 @@ starts blocking real work, ask the owner named above rather than deciding it
 yourself.
 
 Your charter is `instructions.prepend.md` — the file that makes you who you
-are on every turn. On your first turn, send it into this topic with
-`send_file({ path: "instructions.prepend.md", filename: "okr.md" })` and pin
-the result with `pin_message` (`send_file` returns the message id to pass).
-When a key result, constraint, or open question changes, edit that file, then
-re-send and re-pin. Never keep a second copy of the charter: the pinned
-message is the file itself.
+are on every turn. When a key result, constraint, or open question changes,
+edit that file, then re-send and re-pin it here
+(`send_file({ path: "instructions.prepend.md", filename: "okr.md" })` returns
+the message id `pin_message` needs). Never keep a second copy of the charter:
+the pinned message is the file itself.
 `.trim(),
-  brief: "Summarise Dana's runbook and flag any step without a clear owner."
+  // One-time setup lives in the brief (delivered once), never in instructions
+  // (re-read every turn). Today's task rides along at the end.
+  brief: `
+Set yourself up first — each of these is one-time:
+- Preload your workspace: \`python3 /app/skills/topic-agent-charter/scripts/preload_workspace.py report\` from \`/workspace/agent\` (the weekly status is a report).
+- Schedule KR3 idempotently: run \`ncl tasks list\` first and create the task only if none exists — \`ncl tasks create --recurrence "0 9 * * 1" ...\` (0 9 = 09:00 local; cron is read in the group/install timezone, never UTC — do not convert). Then verify with \`ncl tasks get\` that the next run shows 09:00 local.
+- Send this charter into the topic and pin it: \`send_file({ path: "instructions.prepend.md", filename: "okr.md" })\`, then \`pin_message\` on the returned id.
+
+Then do today's task: summarise Dana's runbook and flag any step without a clear owner.
+`.trim()
 })
 ```
 
