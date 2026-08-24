@@ -13,6 +13,7 @@ import { findByName, getAllDestinations } from '../destinations.js';
 import { getMessageIdBySeq, getRoutingBySeq, writeMessageOut } from '../db/messages-out.js';
 import { getCurrentInReplyTo } from '../db/session-state.js';
 import { getSessionRouting } from '../db/session-routing.js';
+import { alreadyDelivered, recordDelivery } from '../turn-ledger.js';
 import { registerTools } from './server.js';
 import type { McpToolDefinition } from './types.js';
 
@@ -92,6 +93,15 @@ export const sendMessage: McpToolDefinition = {
     const routing = resolveRouting(to);
     if ('error' in routing) return err(routing.error);
 
+    // Turn-scoped idempotency: if this exact reply already went to this
+    // destination this turn (the other door, or a repeat tool call), don't
+    // send it again — hand back the id it already landed as.
+    const existing = alreadyDelivered(routing.resolvedName, text);
+    if (existing !== null) {
+      log(`send_message: duplicate of #${existing} this turn → not resent (${routing.resolvedName})`);
+      return ok(`Message already sent to ${routing.resolvedName} this turn (id: ${existing})`);
+    }
+
     const id = generateId();
     const seq = writeMessageOut({
       id,
@@ -102,6 +112,7 @@ export const sendMessage: McpToolDefinition = {
       thread_id: routing.thread_id,
       content: JSON.stringify({ text }),
     });
+    recordDelivery(routing.resolvedName, text, seq);
 
     log(`send_message: #${seq} → ${routing.resolvedName}`);
     return ok(`Message sent to ${routing.resolvedName} (id: ${seq})`);

@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb, getOutboundDb } from '../db/connection.js';
 import { getUndeliveredMessages } from '../db/messages-out.js';
+import { resetTurnLedger } from '../turn-ledger.js';
 import { addReaction, editMessage, pinMessage, sendMessage } from './core.js';
 
 /**
@@ -31,6 +32,9 @@ function publishInReplyTo(id: string, ageMs = 0): void {
 
 beforeEach(() => {
   initTestSessionDb();
+  // Each test is its own turn — clear the cross-door dedup ledger so an
+  // identical send in a prior test doesn't suppress this one.
+  resetTurnLedger();
   // Seed a peer agent destination
   getInboundDb()
     .prepare(
