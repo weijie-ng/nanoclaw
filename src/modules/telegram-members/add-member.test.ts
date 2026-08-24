@@ -206,6 +206,22 @@ describe('scenarios 3 & 4 — owner adds to ALL agents wired to the chat', () =>
     expect(getMembers('ag1').map((m) => m.user_id)).toEqual(['telegram:1001']);
   });
 
+  it('accepts the plural /add-members spelling', async () => {
+    agentGroup('ag1');
+    messagingGroup('mg', 'telegram:-100123');
+    wire('mg', 'ag1');
+    owner('telegram:1');
+    vi.mocked(resolveTelegramUsers).mockResolvedValue([
+      { username: 'alice', userId: 'telegram:1001', inGroup: true, error: null },
+    ]);
+
+    const consumed = await handleAddMember(event('/add-members @alice', '1'));
+
+    expect(consumed).toBe(true);
+    expect(vi.mocked(resolveTelegramUsers).mock.calls[0][1]).toEqual(['alice']);
+    expect(getMembers('ag1').map((m) => m.user_id)).toEqual(['telegram:1001']);
+  });
+
   it('a lone mention works too (scenario 4)', async () => {
     agentGroup('ag1');
     messagingGroup('mg', 'telegram:-100123');

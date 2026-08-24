@@ -20,10 +20,11 @@ import { isGlobalAdmin, isOwner } from '../permissions/db/user-roles.js';
 import { createUser, getUser } from '../permissions/db/users.js';
 import { resolveTelegramUsers, UserbotNotConfigured } from './resolve.js';
 
-// Match /add-member anywhere after start-or-whitespace, with an optional
-// "@BotName" suffix. NOT anchored to ^ — in a mention-engaged group the text
-// arrives as "@TheBot /add-member @alice", so the command is not at the start.
-const ADD_MEMBER_RE = /(?:^|\s)\/add-member(?:@\S+)?(?=\s|$)/i;
+// Match /add-member (or the plural /add-members) anywhere after
+// start-or-whitespace, with an optional "@BotName" suffix. NOT anchored to ^ —
+// in a mention-engaged group the text arrives as "@TheBot /add-member @alice",
+// so the command is not at the start.
+const ADD_MEMBER_RE = /(?:^|\s)\/add-members?(?:@\S+)?(?=\s|$)/i;
 
 /** Extract every @handle regardless of separator (comma, space, newline, or
  *  concatenated like "@a@b"). '@' is not a valid username char, so the greedy
