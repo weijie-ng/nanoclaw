@@ -36,13 +36,13 @@ describe('createReplyContextExtractor', () => {
 
   it('does not flag a reply to a human', () => {
     const extract = createReplyContextExtractor(KNOWN);
-    expect(extract(replyFrom({ username: 'weijie', first_name: 'Wei Jie' }))?.toBot).toBe(false);
+    expect(extract(replyFrom({ username: 'alice', first_name: 'Alice' }))?.toBot).toBe(false);
   });
 
   it('falls back to is_bot before getMe resolves (over-match beats silent no-op)', () => {
     const extract = createReplyContextExtractor(UNRESOLVED);
     expect(extract(replyFrom({ username: 'SomeOtherBot', is_bot: true }))?.toBot).toBe(true);
-    expect(extract(replyFrom({ username: 'weijie', first_name: 'Wei Jie' }))?.toBot).toBe(false);
+    expect(extract(replyFrom({ username: 'alice', first_name: 'Alice' }))?.toBot).toBe(false);
   });
 
   it('picks up the username as soon as getMe resolves (getter, not snapshot)', () => {
@@ -56,8 +56,8 @@ describe('createReplyContextExtractor', () => {
 
   it('still carries the quoted text and sender the formatter renders', () => {
     const extract = createReplyContextExtractor(KNOWN);
-    const ctx = extract(replyFrom({ first_name: 'Wei Jie', username: 'weijie' }, 'are you coming tonight?'));
-    expect(ctx).toMatchObject({ text: 'are you coming tonight?', sender: 'Wei Jie' });
+    const ctx = extract(replyFrom({ first_name: 'Alice', username: 'alice' }, 'are you coming tonight?'));
+    expect(ctx).toMatchObject({ text: 'are you coming tonight?', sender: 'Alice' });
   });
 
   // Forum topics: Telegram threads every topic message off the topic-root

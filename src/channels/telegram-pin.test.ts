@@ -40,8 +40,8 @@ describe('pinTelegramMessage', () => {
     // getMessageIdBySeq hands back `<chatId>:<messageId>`, not a bare int —
     // Number() of that is NaN, which Telegram rejects as "message to pin not found".
     const calls = captureFetch({ ok: true });
-    await pinTelegramMessage('telegram:-1004238703576:526', '-1004238703576:530');
-    expect(calls[0].body).toEqual({ chat_id: '-1004238703576', message_id: 530 });
+    await pinTelegramMessage('telegram:-1001234567890:526', '-1001234567890:530');
+    expect(calls[0].body).toEqual({ chat_id: '-1001234567890', message_id: 530 });
   });
 
   it('throws on a message id with no numeric part rather than sending NaN', async () => {
