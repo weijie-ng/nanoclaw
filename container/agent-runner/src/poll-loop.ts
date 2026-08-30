@@ -25,6 +25,7 @@ import {
   type RoutingContext,
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
+import { alreadyDelivered, recordDelivery, resetTurnLedger } from './turn-ledger.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -503,6 +504,11 @@ export async function processQuery(
     })();
   }, ACTIVE_POLL_INTERVAL_MS);
 
+  // The delivery ledger is turn-scoped; the initial batch is this query's
+  // first turn, so start it clean (a prior processQuery that threw before its
+  // result event could otherwise leave stale entries in this shared singleton).
+  resetTurnLedger();
+
   try {
     for await (const event of query.events) {
       handleEvent(event, routing);
@@ -583,6 +589,13 @@ export async function processQuery(
             if (!willRetryWrapping && !willRetryTaskBlocks) archivePrompts.shift();
           }
         } else archivePrompts.shift();
+        // Turn over — clear the delivery ledger so the next turn (a follow-up
+        // push, or the next batch's query) starts fresh. Cleared here, right
+        // after this turn's result is dispatched, rather than at the follow-up
+        // push: the push runs from the concurrent-poller callback and could
+        // otherwise wipe this turn's records before dispatchResultText above
+        // reads them, reopening the double-send it exists to prevent.
+        resetTurnLedger();
       }
     }
   } catch (err) {
@@ -706,7 +719,18 @@ export function dispatchResultText(
       scratchpadParts.push(`[dropped: unknown destination "${toName}"] ${body}`);
       continue;
     }
-    sendToDestination(dest, body, routing);
+    // Turn-scoped idempotency: this final-text block is the fallback door.
+    // If the agent already delivered this exact reply to this destination via
+    // send_message this turn, it's an echo — don't resend it, but still count
+    // it as sent so `hasUnwrapped` stays false and no re-wrap nudge fires.
+    const dup = alreadyDelivered(toName, body);
+    if (dup !== null) {
+      log(`<message to="${toName}"> already delivered as #${dup} this turn — not resent`);
+      sent++;
+      continue;
+    }
+    const seq = sendToDestination(dest, body, routing);
+    recordDelivery(toName, body, seq);
     sent++;
   }
   if (lastIndex < text.length) {
@@ -786,7 +810,7 @@ export function autoAppendTaskLog(text: string): void {
   log('Task run log auto-appended from final text');
 }
 
-function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
+function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): number {
   const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Resolve thread_id per-destination from the most recent inbound message
@@ -794,7 +818,7 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
   const destRouting = resolveDestinationThread(channelType, platformId);
-  writeMessageOut({
+  return writeMessageOut({
     id: generateId(),
     in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
     kind: 'chat',

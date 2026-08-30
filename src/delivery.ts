@@ -23,9 +23,11 @@ import { getMessagingGroup, getMessagingGroupByPlatform } from './db/messaging-g
 import {
   getDueOutboundMessages,
   getDeliveredIds,
+  insertMessage,
   markDelivered,
   markDeliveryFailed,
   migrateDeliveredTable,
+  getPlatformMessageId,
 } from './db/session-db.js';
 import { runGuarded, type DeliveryGuardSpec, type GuardedDeliveryHandler } from './delivery-guard.js';
 import { isUnguarded, type Unguarded } from './guard/index.js';
@@ -232,6 +234,7 @@ async function drainSession(session: Session): Promise<void> {
           });
           markDeliveryFailed(inDb, msg.id);
           deliveryAttempts.delete(msg.id);
+          notifyOpFailure(inDb, msg, err);
         } else {
           log.warn('Message delivery failed, will retry', {
             messageId: msg.id,
@@ -246,6 +249,82 @@ async function drainSession(session: Session): Promise<void> {
   } finally {
     outDb.close();
     inDb.close();
+  }
+}
+
+/**
+ * Rewrite an operation's target from an internal message id to the platform id
+ * it was delivered as.
+ *
+ * `edit` / `delete` / `reaction` / `pin` all target a message by platform id.
+ * The container resolves that itself when it can, but a message the agent sent
+ * moments ago has no platform id yet — the host only learns it on delivery —
+ * so getMessageIdBySeq hands back the internal `msg-*` id instead. Resolving
+ * it HERE is what makes "send a file, then pin it" deterministic rather than a
+ * race against the delivery poll: the drain is ordered and the target was
+ * queued first, so by the time this op is delivered its target is in
+ * `delivered` with a platform id.
+ *
+ * Pure so the ordering contract is testable without two session DBs; the
+ * caller supplies the lookup. No platform id throws, because a pin against a
+ * message nobody can see is a bug worth surfacing, not a silent no-op.
+ */
+export function resolveTargetMessageId(
+  content: Record<string, unknown>,
+  lookup: (messageOutId: string) => string | null,
+): void {
+  const target = content.messageId;
+  if (typeof target !== 'string' || !target.startsWith('msg-')) return;
+  const platformId = lookup(target);
+  if (!platformId) {
+    throw new Error(`Cannot target message ${target}: it was never delivered, so it has no platform id`);
+  }
+  content.messageId = platformId;
+}
+
+/**
+ * Tell the child when one of its queued ops failed for good.
+ *
+ * pin / edit / reaction / delete return "queued" from the tool call and carry
+ * no outcome back — the agent reports success and never learns otherwise, so a
+ * permanent failure (a missing pin right, a deleted target) lives only in the
+ * host log. On give-up, drop a `system` row into the child's inbox so its next
+ * turn sees it, rendered as `<system_response action="pin" status="failed">`.
+ * `trigger: 0` — context only, no wake, so it rides along on the next natural
+ * turn without spawning a container just to deliver bad news.
+ *
+ * Scoped to ops (`content.operation`): a failed chat/file send is a different
+ * case, and re-surfacing those risks a resend loop. A note that itself failed
+ * to serialize is swallowed — this is best-effort visibility, not a new
+ * failure surface.
+ */
+export function notifyOpFailure(inDb: Database.Database, msg: { id: string; content: string }, err: unknown): void {
+  let operation: unknown;
+  try {
+    operation = (JSON.parse(msg.content) as { operation?: unknown }).operation;
+  } catch {
+    return;
+  }
+  if (typeof operation !== 'string') return;
+  try {
+    insertMessage(inDb, {
+      id: `opfail-${msg.id}`,
+      kind: 'system',
+      timestamp: new Date().toISOString(),
+      platformId: null,
+      channelType: null,
+      threadId: null,
+      content: JSON.stringify({
+        action: operation,
+        status: 'failed',
+        result: err instanceof Error ? err.message : String(err),
+      }),
+      processAfter: null,
+      recurrence: null,
+      trigger: 0,
+    });
+  } catch (noteErr) {
+    log.warn('Could not write op-failure note to inbox', { messageId: msg.id, err: noteErr });
   }
 }
 
@@ -268,6 +347,10 @@ async function deliverMessage(
   }
 
   const content = JSON.parse(msg.content);
+
+  // An op targeting a message this agent sent itself carries the internal id
+  // until the host knows the platform one. See resolveTargetMessageId.
+  resolveTargetMessageId(content, (outId) => getPlatformMessageId(inDb, outId));
 
   // System actions — handle internally (cli_request, etc.)
   if (msg.kind === 'system') {

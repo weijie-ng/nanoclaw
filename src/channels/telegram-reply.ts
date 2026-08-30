@@ -33,6 +33,34 @@ export function createReplyContextExtractor(getBotUsername: () => string | null)
   return (raw: Record<string, any>): ReplyContext | null => {
     if (!raw.reply_to_message) return null;
     const reply = raw.reply_to_message;
+    // FORUM TOPICS: Telegram threads EVERY message in a topic off the topic's
+    // root, so an ordinary message that replies to nothing still arrives with
+    // reply_to_message set to the `forum_topic_created` SERVICE message. That
+    // service message is authored by whoever opened the topic — and topics
+    // opened by spawn_topic_agent are authored by the BOT. Read literally,
+    // every message in such a topic is "a reply to the bot", so toBot would be
+    // true throughout, the bridge would promote all of them to isMention, and
+    // an engage_mode 'mention' wiring would engage on every message —
+    // silently indistinguishable from always-on. (Observed: plain topic
+    // messages carrying replyTo {text:'', sender:<bot>, toBot:true}, while the
+    // same user's plain messages in the parent chat carried no replyTo at all.)
+    //
+    // Two independent signals, either one sufficient, because the root is
+    // reachable both implicitly and by an explicit reply to it:
+    //  - forum_topic_created present — the replied-to message IS the topic
+    //    creation service message.
+    //  - message_id === message_thread_id — Telegram keys a topic by its root
+    //    message's id, so this equality identifies the root even if the
+    //    service payload is absent.
+    // Returning null (rather than toBot:false) is deliberate: there is no
+    // reply here to render either, and an empty quoted block is noise in the
+    // agent's context.
+    if (
+      reply.forum_topic_created !== undefined ||
+      (raw.message_thread_id !== undefined && reply.message_id === raw.message_thread_id)
+    ) {
+      return null;
+    }
     const from = reply.from ?? {};
     const botUsername = getBotUsername();
     const toBot = botUsername

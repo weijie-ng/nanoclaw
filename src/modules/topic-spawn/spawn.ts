@@ -24,6 +24,7 @@ import { randomUUID } from 'crypto';
 import path from 'path';
 
 import type { ChannelAdapter } from '../../channels/adapter.js';
+import { resolveWiringDefaults } from '../../channels/channel-defaults.js';
 import { getChannelAdapterExact } from '../../channels/channel-registry.js';
 import { GROUPS_DIR } from '../../config.js';
 import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
@@ -45,6 +46,23 @@ import { writeDestinations } from '../agent-to-agent/write-destinations.js';
 import { notifyAgent, requestApproval } from '../approvals/index.js';
 import { addMember, getMembers } from '../permissions/db/agent-group-members.js';
 import { getOwners } from '../permissions/db/user-roles.js';
+
+/**
+ * Prepended to every topic agent's charter at creation. A topic agent shares
+ * one bot with the agent that spawned it, so a mention of the bot handle in its
+ * own topic otherwise reads as being for whoever the handle is named after, and
+ * the child stands aside in its own topic. Kept channel-agnostic: the concrete
+ * bot handle is a per-adapter fact this seam doesn't hold, and the rule holds
+ * without naming it.
+ */
+export const TOPIC_AGENT_IDENTITY_PREAMBLE = [
+  '**You are this topic.** This install may run one shared bot in front of several',
+  'agents. Inside your own topic that bot is you, not the agent that spawned you',
+  'and not any sibling the same bot also fronts. A message here that @-mentions the',
+  'bot handle is addressed to you, even when the handle is named after another',
+  "agent. What identifies you is the topic you are in, not the bot's name, so never",
+  'read a mention in your own topic as being for someone else and stand aside.',
+].join('\n');
 
 /** The three fields a `spawn_topic_agent` system row carries. */
 interface SpawnRequest {
@@ -277,7 +295,13 @@ async function performSpawnTopicAgent(
   // never spawned on a runtime this install can't reach.
   const parentConfig = getContainerConfig(sourceGroup.id);
   const parentProvider = parentConfig?.provider ?? 'claude';
-  initGroupFilesystem(newGroup, { instructions: instructions || undefined, provider: parentProvider });
+  // Prepend the shared-bot identity clause (see TOPIC_AGENT_IDENTITY_PREAMBLE)
+  // so every topic agent, even a bare spawn with no instructions, knows the
+  // shared bot is it.
+  const effectiveInstructions = instructions
+    ? `${TOPIC_AGENT_IDENTITY_PREAMBLE}\n\n${instructions}`
+    : TOPIC_AGENT_IDENTITY_PREAMBLE;
+  initGroupFilesystem(newGroup, { instructions: effectiveInstructions, provider: parentProvider });
 
   // Model inheritance, for the same reason as the provider above: an install
   // whose gateway only serves a fixed model list (a LiteLLM key's `models`
@@ -316,10 +340,31 @@ async function performSpawnTopicAgent(
   };
   createMessagingGroup(topicMg);
 
-  // 7. Wire it. Inside its own topic the agent is the only agent, so it
-  //    answers everything: engage_mode 'pattern' with the '.' sentinel
-  //    ("match every message") — no @mention needed. 'drop' since nothing is
-  //    ignored, one shared session.
+  // 7. Wire it. Engagement comes from the CHANNEL DECLARATION for a group
+  //    context (resolveWiringDefaults), exactly as every other
+  //    wiring-creation surface resolves it — ncl, the setup wizard, the
+  //    channel-approval connect path. This used to hardcode engage_mode
+  //    'pattern' with the '.' sentinel on the reasoning that the topic holds
+  //    only one agent so it may answer everything. That holds for AGENTS and
+  //    not for HUMANS: a topic is still a shared forum conversation, so an
+  //    always-on wiring makes the agent answer people talking to each other.
+  //    On a mention channel the declaration resolves to 'mention', which the
+  //    bridge already satisfies for a REPLY to the bot as well as an @mention
+  //    (resolveInboundMention in src/channels/chat-sdk-bridge.ts promotes
+  //    reply-to-bot to isMention) — so "@it or reply to it" engages and
+  //    ambient chatter does not. Channels that declare an always-on group
+  //    context still get always-on here; the decision moved to the
+  //    declaration rather than being overridden per spawn.
+  //
+  //    COUPLED to step 10: the replayed brief must carry isMention so the new
+  //    agent still wakes on it under a mention-mode wiring.
+  //
+  //    Falls back to 'mention' if the declaration is malformed (a 'pattern'
+  //    context with no pattern makes resolveWiringDefaults throw). By this
+  //    point the topic and the agent group exist and every remaining write is
+  //    unconditional, so throwing here would strand them with no wiring at
+  //    all; the conservative mode keeps the spawn coherent and recoverable
+  //    with one `ncl wirings update`.
   //
   //    sender_scope is INHERITED from the wiring that asked for the spawn, not
   //    fixed at 'all': the two gates are independent, and sender_scope is the
@@ -334,12 +379,19 @@ async function performSpawnTopicAgent(
   //    one-directional: a spawn can only ever be as strict as the chat it came
   //    from, never looser.
   const parentWiring = getMessagingGroupAgentByPair(parentMg.id, sourceGroup.id);
+  let engage: { engage_mode: 'pattern' | 'mention' | 'mention-sticky'; engage_pattern: string | null };
+  try {
+    engage = resolveWiringDefaults(channelKey, true, name, parentMg.channel_type);
+  } catch (err) {
+    engage = { engage_mode: 'mention', engage_pattern: null };
+    log.warn('spawn_topic_agent: channel declares malformed group defaults, wiring as mention', { channelKey, err });
+  }
   createMessagingGroupAgent({
     id: generateId('mga'),
     messaging_group_id: messagingGroupId,
     agent_group_id: agentGroupId,
-    engage_mode: 'pattern',
-    engage_pattern: '.',
+    engage_mode: engage.engage_mode,
+    engage_pattern: engage.engage_pattern,
     sender_scope: parentWiring?.sender_scope ?? 'known',
     ignored_message_policy: 'drop',
     session_mode: 'shared',
@@ -412,6 +464,15 @@ async function performSpawnTopicAgent(
   //     threadId is null: the topic's identity is its platform_id, and the
   //     adapters this targets are non-threaded anyway (the router would strip
   //     it). isGroup marks the topic as a group context for the gate.
+  //
+  //     isMention is REQUIRED, not decorative: step 7 wires the topic from the
+  //     channel declaration, which on a mention channel is engage_mode
+  //     'mention', and the router engages on `event.message.isMention === true`
+  //     (src/router.ts). A synthetic replay carries no platform mention signal,
+  //     so without this flag the brief routes, is judged not-addressed, and the
+  //     brand-new agent never wakes on the request it was spawned for. Setting
+  //     it is honest rather than a workaround: this message IS addressed to
+  //     that agent — the whole topic was created to carry it.
   if (brief) {
     try {
       await routeInbound({
@@ -427,6 +488,7 @@ async function performSpawnTopicAgent(
           // is the one the access gate resolves (see replaySenderId).
           content: JSON.stringify({ text: brief, sender: sourceGroup.name, senderId: replaySenderId() }),
           isGroup: true,
+          isMention: true,
         },
       });
     } catch (err) {

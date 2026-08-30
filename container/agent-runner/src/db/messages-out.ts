@@ -109,7 +109,10 @@ export function getMessageIdBySeq(seq: number): string | null {
     .get(outRow.id) as { platform_message_id: string | null } | undefined;
   if (deliveredRow?.platform_message_id) return deliveredRow.platform_message_id;
 
-  // Fallback to internal ID (edits/reactions on undelivered messages won't work)
+  // Not delivered yet — hand back the internal id. The HOST resolves it
+  // against the same `delivered` table at delivery time (resolveTargetMessageId
+  // in src/delivery.ts), by which point the target has been delivered: the
+  // drain is ordered, and the target was queued before the op targeting it.
   return outRow.id;
 }
 
