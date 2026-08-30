@@ -10,6 +10,10 @@ Use `mcp__nanoclaw__send_file({ to, path, text?, filename? })` to deliver a file
 
 Use `mcp__nanoclaw__add_reaction({ messageId, emoji })` to react to a specific inbound message by its `#N` id — pass `messageId` as an integer (e.g. `22`, not `"22"`). Good for lightweight acknowledgment (`eyes` = seen, `white_check_mark` = done) when a full reply would be noise. `emoji` is the shortcode name (e.g. `thumbs_up`, `heart`), not the raw character.
 
+### Pinning messages (`pin_message`)
+
+Use `mcp__nanoclaw__pin_message({ messageId, unpin? })` to pin a message by its `#N` id, or unpin it with `unpin: true`. Telegram only — other channels drop it. Pinning notifies the whole chat, so keep it for things that are genuinely worth everyone's attention.
+
 ### Internal thoughts
 
 Wrap reasoning in `<internal>...</internal>` tags to mark it as scratchpad — logged but not sent.

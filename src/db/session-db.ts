@@ -284,6 +284,14 @@ export function markDelivered(db: Database.Database, messageOutId: string, platf
   ).run(messageOutId, platformMessageId ?? null, new Date().toISOString());
 }
 
+/** Platform message id a delivered outbound row landed as; null if it never landed. */
+export function getPlatformMessageId(db: Database.Database, messageOutId: string): string | null {
+  const row = db.prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ?').get(messageOutId) as
+    | { platform_message_id: string | null }
+    | undefined;
+  return row?.platform_message_id ?? null;
+}
+
 export function markDeliveryFailed(db: Database.Database, messageOutId: string): void {
   db.prepare(
     "INSERT OR IGNORE INTO delivered (message_out_id, platform_message_id, status, delivered_at) VALUES (?, NULL, 'failed', ?)",

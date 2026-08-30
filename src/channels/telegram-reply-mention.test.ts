@@ -36,13 +36,13 @@ describe('createReplyContextExtractor', () => {
 
   it('does not flag a reply to a human', () => {
     const extract = createReplyContextExtractor(KNOWN);
-    expect(extract(replyFrom({ username: 'weijie', first_name: 'Wei Jie' }))?.toBot).toBe(false);
+    expect(extract(replyFrom({ username: 'alice', first_name: 'Alice' }))?.toBot).toBe(false);
   });
 
   it('falls back to is_bot before getMe resolves (over-match beats silent no-op)', () => {
     const extract = createReplyContextExtractor(UNRESOLVED);
     expect(extract(replyFrom({ username: 'SomeOtherBot', is_bot: true }))?.toBot).toBe(true);
-    expect(extract(replyFrom({ username: 'weijie', first_name: 'Wei Jie' }))?.toBot).toBe(false);
+    expect(extract(replyFrom({ username: 'alice', first_name: 'Alice' }))?.toBot).toBe(false);
   });
 
   it('picks up the username as soon as getMe resolves (getter, not snapshot)', () => {
@@ -56,8 +56,46 @@ describe('createReplyContextExtractor', () => {
 
   it('still carries the quoted text and sender the formatter renders', () => {
     const extract = createReplyContextExtractor(KNOWN);
-    const ctx = extract(replyFrom({ first_name: 'Wei Jie', username: 'weijie' }, 'are you coming tonight?'));
-    expect(ctx).toMatchObject({ text: 'are you coming tonight?', sender: 'Wei Jie' });
+    const ctx = extract(replyFrom({ first_name: 'Alice', username: 'alice' }, 'are you coming tonight?'));
+    expect(ctx).toMatchObject({ text: 'are you coming tonight?', sender: 'Alice' });
+  });
+
+  // Forum topics: Telegram threads every topic message off the topic-root
+  // service message, which for a spawn_topic_agent topic the BOT authored.
+  // Left unsuppressed, every plain message in the topic reads as a reply to
+  // the bot and an engage_mode 'mention' wiring degrades to always-on.
+  describe('forum topic root is not a reply', () => {
+    const BOT = { username: 'MyNanoClawBot', is_bot: true };
+
+    it('ignores the implicit root pointer via forum_topic_created', () => {
+      const extract = createReplyContextExtractor(KNOWN);
+      expect(
+        extract({
+          message_thread_id: 35,
+          reply_to_message: { message_id: 35, from: BOT, forum_topic_created: { name: 'Tech Watch' } },
+        }),
+      ).toBeNull();
+    });
+
+    it('ignores the implicit root pointer on message_id === message_thread_id alone', () => {
+      const extract = createReplyContextExtractor(KNOWN);
+      expect(extract({ message_thread_id: 35, reply_to_message: { message_id: 35, text: '', from: BOT } })).toBeNull();
+    });
+
+    it('still flags a genuine reply to the bot INSIDE a topic', () => {
+      const extract = createReplyContextExtractor(KNOWN);
+      const ctx = extract({
+        message_thread_id: 35,
+        reply_to_message: { message_id: 58, text: 'here is the digest', from: BOT },
+      });
+      expect(ctx).toMatchObject({ text: 'here is the digest', toBot: true });
+    });
+
+    it('leaves an ordinary chat reply alone when ids coincidentally differ in shape', () => {
+      const extract = createReplyContextExtractor(KNOWN);
+      // No message_thread_id at all — the parent-chat case, unchanged.
+      expect(extract({ reply_to_message: { message_id: 35, text: 'hi', from: BOT } })?.toBot).toBe(true);
+    });
   });
 
   it('reads caption for media replies, and tolerates a missing from', () => {
