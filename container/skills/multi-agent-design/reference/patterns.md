@@ -58,12 +58,12 @@ flowchart TB
 *Anthropic name: routing.*
 
 - **What it is.** Classify the input and dispatch it to a specialised followup, for separation of concerns and tighter per-branch prompts.
-- **NanoClaw realisation.** There is no live-dispatch primitive. The cheapest router is one agent picking a skill or a subagent brief by the request: `planner`, `fact-checker` and `data-analyst` already *are* the specialised followups. `planner` decomposes and returns a plan; the caller is the router that reads it and picks each brief. Routing among standing agents means each dispatch is a `send_message`, a wake on each side, and the router must already hold a destination row (the ACL) to every target.
+- **NanoClaw realisation.** There is no live-dispatch primitive. The cheapest router is one agent picking a skill or a subagent brief by the request: a planning brief decomposes and returns a plan, and the caller is the router that reads it and picks each specialist. Routing among standing agents means each dispatch is a `send_message`, a wake on each side, and the router must already hold a destination row (the ACL) to every target.
 - **Cost.** Subagent or skill routing: one turn, near-free classification. Standing routing: two wakes per dispatched branch, and the router holds the correlation itself, with no ack to tell it a branch went quiet.
 - **Worth it when.** Distinct categories genuinely better handled by different specialists, and the classification is reliable. Among standing agents, only when the branches are already standing concerns for other reasons: never spin agents up to be routing targets.
 - **Costume for.** Skill or subagent-brief selection. Routing-to-standing-agents is usually that cheaper in-turn pick wearing a costume: you paid a classification hop and a wake for what choosing a brief does inside one turn.
 - **Failure mode.** The categories are not truly distinct, so you paid a classification hop for nothing.
-- **Reconciles.** The genuinely new entry, with no inline name today. `planner` (Step 2) decomposes but does not dispatch: it returns a plan, the caller routes.
+- **Reconciles.** The genuinely new entry, with no inline name today. A planning subagent (Step 2) decomposes but does not dispatch: it returns a plan, the caller routes.
 
 ## Fan-out / fan-in
 
@@ -82,7 +82,7 @@ flowchart TB
 *Anthropic name: evaluator-optimiser.*
 
 - **What it is.** One mind drafts, a *different* mind evaluates and feeds back, iterate to a nameable exit. Identical to the skill's existing generate-then-critique loop: the same pattern, not a new label.
-- **NanoClaw realisation.** Subagents: a drafter plus a separate critic, picked by what the critique is *about* - `refuter` (could the conclusion be wrong; it never saw how the draft was made), `fact-checker` (is the claim true), `verifier` (does the artefact meet criteria stated in advance). Almost never standing: a critique that returns into your turn is by definition a subagent, so Step 1 keeps it off the standing tier.
+- **NanoClaw realisation.** Subagents: a drafter plus a separate critic, briefed by what the critique is *about* - a refuter (could the conclusion be wrong; it never saw how the draft was made), a fact-checker (is the claim true), a verifier (does the artefact meet criteria stated in advance). Almost never standing: a critique that returns into your turn is by definition a subagent, so Step 1 keeps it off the standing tier.
 - **Cost.** Two-plus in-turn calls. The critic must not be the drafter and must not have seen the draft's making: that blindness is the whole reason the second call exists. As standing agents each loop is two wakes and the draft travels by message, which is rarely warranted.
 - **Worth it when.** Clear evaluation criteria and iterative refinement that buys measurable value. Name the exit condition and the iteration cap before you start; "until it is good" runs forever.
 - **Costume for.** If the drafter grades its own work, it is a single pass pretending to be a loop. The pattern exists only to stop that.

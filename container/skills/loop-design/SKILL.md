@@ -34,7 +34,7 @@ Five things. Write them into memory, in the task's own note, before the first se
 |---|---|
 | **Trigger** | Ad-hoc (this message), a one-shot `ncl tasks create --process-after`, or a `--recurrence` cron. Decide now: a loop that will wake again needs its state designed for a reader who has never seen this conversation, and retrofitting that is a rewrite. |
 | **Done-condition** | The check you will run to prove it. "All twelve accounts in the sheet have a verdict and a source URL" — not "a good overview". |
-| **Tools** | Which skills give you real feedback rather than recall: `web-search`, `news-search`, `page-read`, `social-search`, `forum-search`, `fact-check`, `agent-browser`. Naming them upfront stops you answering from memory. Plus `Task`, if the work splits — see below. |
+| **Tools** | The tools that give you real feedback rather than recall: `agent-browser` for the live web, reading the actual pages you cite rather than recalling them, and an independent check pass over the draft. Naming them upfront stops you answering from memory. Plus `Task`, if the work splits — see below. |
 | **State** | Where the running answer, the sources, the dead ends and the attempt count live. Memory, and `ncl tasks append-log --msg` for a recurring series. |
 | **Stop rules** | All three: done, gave up (a hard cap, two passes by default — see Stopping), handed back (ambiguous or risky). |
 
@@ -59,7 +59,7 @@ Iterating without a check is just producing more text. A real check consults som
 
 | Not a check | A check |
 |---|---|
-| Rereading your summary and finding it reasonable | `fact-check` over the draft, or `page-read` on each cited URL to confirm it says what you claimed |
+| Rereading your summary and finding it reasonable | An independent check pass over the draft, or reading each cited URL to confirm it says what you claimed |
 | "I searched thoroughly" | A named coverage test: every account in the analyst's list has a row; three independent searches surfaced no seventh competitor |
 | Deciding the numbers look right | Two sources per number, and the reconciliation written down where they disagreed |
 | Confidence that the source was recent | The publication date, read off the page, against the quarter you were asked about |
@@ -78,7 +78,7 @@ Three uses, in order of how often they earn their cost:
 - **The verifier.** Spawn the check as its own agent, and tell it to *refute* the draft rather than confirm it. It has no memory of your reasoning, so it cannot inherit your mistake. This is the writer/checker split made real instead of pretended.
 - **Angle fan-out.** When you do not know where the answer lives, send subagents down different routes — news, forums, the company's own pages, social — each blind to the others. One angle finding nothing is information; four angles finding nothing is close to a verdict.
 
-Launch independent subagents in a single message so they actually run in parallel, and hold the fan to what the task needs. Each one pays its own model and tool costs, so a fan of nine is roughly nine times the spend of one — and if each is running a billed `page-read` or `social-search` tier, count those too before you set the width.
+Launch independent subagents in a single message so they actually run in parallel, and hold the fan to what the task needs. Each one pays its own model and tool costs, so a fan of nine is roughly nine times the spend of one — and if each is running a billed collection or fetch tier, count those too before you set the width.
 
 The return contract is the whole game. A subagent cannot message you mid-run and you never see its working, so its final report is the only thing you get: say exactly what to return, in what shape, with source URLs. Anything you did not ask for is gone. And treat what comes back as a claim, not a fact — a subagent can be confidently wrong just as you can, which is why the verifier is a separate agent and not the same one marking its own homework.
 
@@ -115,7 +115,7 @@ Say which loop you ran when you report. Two sentences: how you checked, and wher
 - **One pass genuinely suffices** — a translation, a summary of a document you were handed, a single classification. Looping adds cost and drift, not accuracy.
 - **Nothing is checkable** — "which of these names do you like best" is the analyst's call. Present options; do not iterate towards an imagined preference.
 - **Each iteration has a cost that lands on someone else** — anything that sends, posts, files, or notifies. Draft in the loop, act once outside it.
-- **Billed tools per iteration** — the paid tiers behind `social-search` and `page-read` charge per collection. Cache-aware reuse is free; a fifteen-round loop over fresh collections is not. Budget the calls when you set the cap.
+- **Billed tools per iteration** — any paid tier behind a collection or fetch tool charges per call. Cache-aware reuse is free; a fifteen-round loop over fresh collections is not. Budget the calls when you set the cap.
 
 ## Failure modes
 
@@ -136,7 +136,7 @@ Say which loop you ran when you report. Two sentences: how you checked, and wher
 
 Written before searching: done-condition is *each of the nine competitors on the analyst's list has a verdict (changed / did not change / could not establish) with a dated source URL, and the three biggest have a second source*. Shape is plan-execute-replan across the nine, draft-and-verify within each. Cap of two verification attempts per competitor. State holds the nine rows, sources, and exhausted queries.
 
-Fan out: nine subagents in one message, one per competitor, each told to run `web-search` and `news-search` for a pricing change, `page-read` the pricing page itself, read the date off the page rather than inferring it from the search snippet, and return exactly a verdict, a one-line change description, and dated source URLs. Where two sources disagree, the disagreement comes back in the row. You write the nine rows into state as they land; none of them touches the file.
+Fan out: nine subagents in one message, one per competitor, each told to search the web for a pricing change, read the pricing page itself, read the date off the page rather than inferring it from the search snippet, and return exactly a verdict, a one-line change description, and dated source URLs. Where two sources disagree, the disagreement comes back in the row. You write the nine rows into state as they land; none of them touches the file.
 
 Then the three biggest go to a verifier subagent apiece, prompted to refute the row rather than confirm it.
 

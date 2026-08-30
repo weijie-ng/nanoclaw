@@ -191,7 +191,7 @@
       </figure>
       <div class="plist pro"><h4>Pros</h4><ul>
         <li>Tighter prompts per branch: each specialist carries only what its own category needs.</li>
-        <li>The cheap version is near-free: one agent picks a skill or a subagent brief (planner, fact-checker, data-analyst) inside a single turn.</li>
+        <li>The cheap version is near-free: one agent picks a skill or a subagent brief for the category inside a single turn.</li>
         <li>Clean separation of concerns when the categories are genuinely distinct.</li>
       </ul></div>
       <div class="plist con"><h4>Cons</h4><ul>
@@ -281,7 +281,7 @@
       </figure>
       <div class="plist pro"><h4>Pros</h4><ul>
         <li>Catches errors a single pass misses: the second mind is there precisely to find what the drafter cannot see in its own work.</li>
-        <li>Cheap as subagents: two-plus in-turn calls, a drafter plus a fit-for-purpose critic (refuter for 'could this be wrong', fact-checker for 'is it true', verifier for 'does it meet the stated criteria').</li>
+        <li>Cheap as subagents: two-plus in-turn calls, a drafter plus a fit-for-purpose critic (a refuter for 'could this be wrong', a fact-checker for 'is it true', a verifier for 'does it meet the stated criteria').</li>
         <li>Iterative refinement that measurably improves the output when the criteria are clear.</li>
       </ul></div>
       <div class="plist con"><h4>Cons</h4><ul>
@@ -290,9 +290,9 @@
         <li>As standing agents each loop is two wakes and the draft travels by message, which is rarely warranted.</li>
       </ul></div>
       <div class="plist use"><h4>Use cases</h4><ul>
-        <li>Draft an argument, have refuter try to knock it down, revise, and stop when no new objection lands.</li>
-        <li>Write a claim-heavy summary, run fact-checker over it, then fix what fails.</li>
-        <li>Produce an artefact against a checklist, and have verifier confirm each criterion before it ships.</li>
+        <li>Draft an argument, have a refuter subagent try to knock it down, revise, and stop when no new objection lands.</li>
+        <li>Write a claim-heavy summary, run a fact-check pass over it, then fix what fails.</li>
+        <li>Produce an artefact against a checklist, and have a verifier subagent confirm each criterion before it ships.</li>
       </ul></div>
     </article>
 
