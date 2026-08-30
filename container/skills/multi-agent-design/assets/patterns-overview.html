@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-agent patterns at a glance</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #ffffff; --fg: #16202c; --muted: #5b6675; --rule: #d7dee8;
+    --panel: #eef3fa; --accent: #0033a0;
+    --pro: #1f7a4d; --con: #a1382c; --use: #0033a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg); margin: 0;
+    font: 17px/1.6 Georgia, "Iowan Old Style", "Times New Roman", serif;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 64rem; margin: 0 auto; }
+  h1, h2, .kicker, .fmt-name, .also, .legend, .pagefoot, .plist h4 {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .kicker {
+    font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 .7rem; font-weight: 600;
+  }
+  h1 { font-size: 1.95rem; line-height: 1.2; letter-spacing: -0.02em; margin: 0 0 .8rem; }
+  .intro { font-size: 1.08rem; color: var(--fg); margin: 0 0 1.1rem; max-width: 46rem; }
+  .intro .ask { color: var(--accent); font-weight: 600; }
+  .words { font-size: .96rem; color: var(--fg); margin: 0 0 1.4rem; max-width: 46rem; }
+  .words b { color: var(--accent); }
+
+  .legend {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.6rem;
+    font-size: .82rem; color: var(--muted);
+    padding: .85rem 1rem; background: var(--panel); border-radius: 6px;
+    margin: 0 0 2.2rem;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: .5rem; }
+  .legend svg { flex: 0 0 auto; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(28rem, 1fr));
+    gap: 1.25rem;
+  }
+  .card {
+    border: 1px solid var(--rule); border-radius: 8px;
+    padding: 1.15rem 1.2rem 1.35rem;
+  }
+  .fmt-name { font-size: 1.15rem; font-weight: 700; margin: 0 0 .1rem; }
+  .also { font-size: .78rem; color: var(--muted); font-style: italic; margin: 0 0 .6rem; }
+  .whatis { font-size: .96rem; margin: 0 0 .5rem; }
+
+  figure.diagram {
+    margin: 1rem 0 1.1rem; padding: 1rem .6rem .7rem;
+    background: var(--panel); border-radius: 6px; text-align: center;
+  }
+  figure.diagram svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figure.diagram figcaption {
+    margin-top: .55rem; font-size: .8rem; line-height: 1.4;
+    color: var(--muted); font-style: italic;
+    max-width: 30rem; margin-left: auto; margin-right: auto;
+  }
+
+  .plist { border-left: 3px solid var(--pro); padding-left: .85rem; margin: .8rem 0; }
+  .plist.con { border-left-color: var(--con); }
+  .plist.use { border-left-color: var(--use); }
+  .plist h4 {
+    font-size: .7rem; letter-spacing: .12em; text-transform: uppercase;
+    font-weight: 700; margin: 0 0 .35rem; color: var(--pro);
+  }
+  .plist.con h4 { color: var(--con); }
+  .plist.use h4 { color: var(--use); }
+  .plist ul { margin: 0; padding-left: 1.05rem; }
+  .plist li { font-size: .9rem; line-height: 1.5; margin: .28rem 0; }
+
+  /* Shared wireframe styling for every card's inline SVG. Solid stroke = a call sent out
+     (send / dispatch); dashed stroke = a result coming back (return / reply). */
+  svg text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--fg); }
+  svg .nlabel { font-size: 13px; font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+  svg .lbl { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+  svg .node { fill: #ffffff; stroke: var(--accent); stroke-width: 1.6; }
+  svg .node.critic { fill: var(--panel); stroke-width: 2.4; }
+  svg .send { stroke: var(--accent); stroke-width: 1.7; fill: none; }
+  svg .ret { stroke: var(--muted); stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; }
+  svg .faint { stroke: var(--muted); stroke-width: 1.3; fill: none; stroke-dasharray: 3 4; opacity: .7; }
+
+  .pagefoot {
+    margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+    font-size: .74rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <p class="kicker">Multi-agent design</p>
+  <h1>Multi-agent patterns at a glance</h1>
+  <p class="intro">When a job is too big or too mixed for one go, there are five shapes for splitting
+  it up. Each has a cost, and reaching for the wrong one is how a simple request gets expensive. Here
+  is what each shape is, what it is good and bad at, and when to pick it.
+  <span class="ask">Point at any pattern and ask me to walk you through it, or to build your task in
+  one.</span></p>
+
+  <p class="words">Two words run through the cards. A <b>subagent</b> is a helper that runs inside a
+  single reply and hands its answer straight back, so it is cheap and nothing is left running. A
+  <b>standing agent</b> is a separate assistant that keeps going between chats: every message to it is
+  a fresh wake-up on both sides, which is what makes it dear. Most of these patterns have a cheap
+  subagent version and an expensive standing-agent version of the same shape.</p>
+
+  <div class="legend">
+    <span>
+      <svg width="46" height="12" viewBox="0 0 46 12" role="img" aria-label="solid arrow">
+        <defs><marker id="legSolid" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0033a0"/></marker></defs>
+        <line x1="2" y1="6" x2="38" y2="6" class="send" marker-end="url(#legSolid)"/>
+      </svg>
+      Solid arrow: a call sent out
+    </span>
+    <span>
+      <svg width="46" height="12" viewBox="0 0 46 12" role="img" aria-label="dashed arrow">
+        <defs><marker id="legRet" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#5b6675"/></marker></defs>
+        <line x1="2" y1="6" x2="38" y2="6" class="ret" marker-end="url(#legRet)"/>
+      </svg>
+      Dashed arrow: a result coming back
+    </span>
+    <span>On the looping pattern, the one way out is labelled.</span>
+  </div>
+
+  <div class="grid">
+
+    <article class="card">
+      <p class="fmt-name">Chain</p>
+      <p class="also">Also called prompt chaining.</p>
+      <p class="whatis">A pipeline where each step takes only the previous step's finished output, not
+      everything it knew: parse a document, pull the figures from the parse, then summarise the
+      figures. Each handoff is small on purpose, which is what keeps it cheap.</p>
+      <figure class="diagram">
+        <svg width="520" height="130" viewBox="0 0 540 130" role="img" aria-label="Three stages in a row joined by solid arrows, a small handoff between each">
+          <defs><marker id="arH-chain" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0033a0"/></marker></defs>
+          <rect class="node" x="20" y="30" width="100" height="48" rx="8"/><text class="nlabel" x="70" y="54">Stage 1</text>
+          <rect class="node" x="220" y="30" width="100" height="48" rx="8"/><text class="nlabel" x="270" y="54">Stage 2</text>
+          <rect class="node" x="420" y="30" width="100" height="48" rx="8"/><text class="nlabel" x="470" y="54">Stage 3</text>
+          <line class="send" x1="120" y1="54" x2="212" y2="54" marker-end="url(#arH-chain)"/>
+          <line class="send" x1="320" y1="54" x2="412" y2="54" marker-end="url(#arH-chain)"/>
+          <text class="lbl" x="167" y="100">small handoff</text>
+          <text class="lbl" x="367" y="100">small handoff</text>
+        </svg>
+        <figcaption>Each stage's output is the only thing feeding the next, so nothing piles up along
+        the line.</figcaption>
+      </figure>
+      <div class="plist pro"><h4>Pros</h4><ul>
+        <li>Cheap: each stage is one in-turn subagent call with nothing left running to maintain.</li>
+        <li>Keeps context small: a stage carries forward only the last stage's output, so bulk never piles up in your head.</li>
+        <li>Fixed, predictable shape: the stages are known in advance and easy to reason about.</li>
+      </ul></div>
+      <div class="plist con"><h4>Cons</h4><ul>
+        <li>Only pays off if the handoff stays genuinely small; if a stage has to re-read what the previous one read, you split the work for nothing.</li>
+        <li>Should never be built from standing agents: a standing pipeline re-transfers the built-up context at every hop, a wake on each side per stage for no gain.</li>
+        <li>Errors travel forward: a bad early parse quietly poisons every later stage.</li>
+      </ul></div>
+      <div class="plist use"><h4>Use cases</h4><ul>
+        <li>Parse a document, extract the numbers from the parse, then summarise the numbers.</li>
+        <li>Translate text, then check the translation reads naturally, as two ordered passes.</li>
+        <li>Clean and normalise messy data, then run the analysis on the clean version.</li>
+      </ul></div>
+    </article>
+
+    <article class="card">
+      <p class="fmt-name">Router</p>
+      <p class="also">Also called routing.</p>
+      <p class="whatis">One classify-then-dispatch step: look at the request, decide which category it
+      falls into, and hand it to the specialist best suited to it, instead of making one generalist do
+      everything. The cheapest router is just one agent picking a skill or a subagent brief by the
+      request.</p>
+      <figure class="diagram">
+        <svg width="520" height="210" viewBox="0 0 540 210" role="img" aria-label="A classify node fanning by solid arrows to three specialist branches, of which one fires">
+          <defs><marker id="arH-router" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0033a0"/></marker></defs>
+          <rect class="node" x="210" y="16" width="120" height="46" rx="8"/><text class="nlabel" x="270" y="39">classify</text>
+          <rect class="node" x="44" y="136" width="96" height="46" rx="8"/><text class="nlabel" x="92" y="159">facts</text>
+          <rect class="node" x="222" y="136" width="96" height="46" rx="8"/><text class="nlabel" x="270" y="159">data</text>
+          <rect class="node" x="400" y="136" width="96" height="46" rx="8"/><text class="nlabel" x="448" y="159">plan</text>
+          <line class="send" x1="270" y1="62" x2="100" y2="134" marker-end="url(#arH-router)"/>
+          <line class="send" x1="270" y1="62" x2="270" y2="134" marker-end="url(#arH-router)"/>
+          <line class="send" x1="270" y1="62" x2="440" y2="134" marker-end="url(#arH-router)"/>
+          <text class="lbl" x="270" y="201">only one branch fires</text>
+        </svg>
+        <figcaption>One decision node fans to labelled specialists, and exactly one of them
+        fires.</figcaption>
+      </figure>
+      <div class="plist pro"><h4>Pros</h4><ul>
+        <li>Tighter prompts per branch: each specialist carries only what its own category needs.</li>
+        <li>The cheap version is near-free: one agent picks a skill or a subagent brief for the category inside a single turn.</li>
+        <li>Clean separation of concerns when the categories are genuinely distinct.</li>
+      </ul></div>
+      <div class="plist con"><h4>Cons</h4><ul>
+        <li>Only worth it if the categories are really distinct; if they overlap, you paid a classification hop for nothing.</li>
+        <li>There is no live-dispatch primitive: routing among standing agents makes each dispatch a message, a wake on each side, and the router must already hold a destination row to every target.</li>
+        <li>No ack: with standing targets the router holds the correlation itself, and nothing tells it a branch went quiet.</li>
+        <li>Agents spun up just to be routing targets are usually the cheap in-turn brief-pick wearing a costume.</li>
+      </ul></div>
+      <div class="plist use"><h4>Use cases</h4><ul>
+        <li>Sort incoming questions into 'factual lookup', 'data crunch' and 'planning', and hand each to the matching brief.</li>
+        <li>Triage support messages: refunds down one path, bug reports down another.</li>
+        <li>Pick the right skill for a request (a document task versus a search task) before doing the work.</li>
+      </ul></div>
+    </article>
+
+    <article class="card">
+      <p class="fmt-name">Fan-out / fan-in</p>
+      <p class="also">Also called parallelisation (sectioning) or orchestrator-workers.</p>
+      <p class="whatis">Split a job into independent pieces, run them at the same time, then gather the
+      results into one answer. The pieces can be fixed in advance (sectioning) or decided on the fly
+      (orchestrator-workers): same shape either way.</p>
+      <figure class="diagram">
+        <svg width="540" height="262" viewBox="0 0 560 262" role="img" aria-label="A caller sending by solid arrows to three separate workers, which return by dashed arrows into a manual gather node">
+          <defs>
+            <marker id="arH-fan" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0033a0"/></marker>
+            <marker id="arR-fan" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#5b6675"/></marker>
+          </defs>
+          <rect class="node" x="220" y="12" width="120" height="46" rx="8"/><text class="nlabel" x="280" y="35">you (caller)</text>
+          <rect class="node" x="40" y="112" width="100" height="46" rx="8"/><text class="nlabel" x="90" y="135">worker 1</text>
+          <rect class="node" x="230" y="112" width="100" height="46" rx="8"/><text class="nlabel" x="280" y="135">worker 2</text>
+          <rect class="node" x="420" y="112" width="100" height="46" rx="8"/><text class="nlabel" x="470" y="135">worker 3</text>
+          <rect class="node" x="175" y="200" width="210" height="54" rx="8"/>
+          <text class="nlabel" x="280" y="220">you aggregate</text>
+          <text class="lbl" x="280" y="240">fan-in is manual</text>
+          <line class="send" x1="280" y1="58" x2="98" y2="110" marker-end="url(#arH-fan)"/>
+          <line class="send" x1="280" y1="58" x2="280" y2="110" marker-end="url(#arH-fan)"/>
+          <line class="send" x1="280" y1="58" x2="462" y2="110" marker-end="url(#arH-fan)"/>
+          <line class="ret" x1="90" y1="158" x2="238" y2="198" marker-end="url(#arR-fan)"/>
+          <line class="ret" x1="280" y1="158" x2="280" y2="198" marker-end="url(#arR-fan)"/>
+          <line class="ret" x1="470" y1="158" x2="322" y2="198" marker-end="url(#arR-fan)"/>
+        </svg>
+        <figcaption>Out and back to independent workers, with one gather point that nobody fills for
+        you.</figcaption>
+      </figure>
+      <div class="plist pro"><h4>Pros</h4><ul>
+        <li>Parallel speed: N pieces run together inside one turn as subagents.</li>
+        <li>Keeps bulk out of your context: each subagent reads its slice and returns only the finding, not the raw material.</li>
+        <li>Good for genuinely independent facets that do not need to know about each other.</li>
+      </ul></div>
+      <div class="plist con"><h4>Cons</h4><ul>
+        <li>Fan-in is your job: nobody aggregates for you, so you hold the running answer and decide what to do if only some pieces have reported.</li>
+        <li>Parallel subagents share one workspace, so two writing the same file race and one wins silently: return findings, or give each its own filename.</li>
+        <li>The standing chief-and-workers version costs a wake on each side per worker, workers cannot reach each other, and there is no ack to tell a crashed worker from a slow one.</li>
+        <li>Standing each worker up needs admin approval unless your cli_scope is global; only worth it when the workers are real standing concerns, not just here to serve this request.</li>
+      </ul></div>
+      <div class="plist use"><h4>Use cases</h4><ul>
+        <li>Read six files and report which ones match a rule, one reader per file.</li>
+        <li>Summarise ten articles in parallel, then merge them into one briefing.</li>
+        <li>Check a claim against several sources at once, then weigh the results together.</li>
+      </ul></div>
+    </article>
+
+    <article class="card">
+      <p class="fmt-name">Reflect-and-critique</p>
+      <p class="also">Also called evaluator-optimiser.</p>
+      <p class="whatis">One mind drafts, a different mind attacks the draft and feeds back, and you
+      iterate to a clearly named stopping point. The critic must not be the drafter, and must not have
+      seen how the draft was made: that blindness is the whole reason the second call exists.</p>
+      <figure class="diagram">
+        <svg width="560" height="180" viewBox="0 0 620 180" role="img" aria-label="A draft node and a separate critic node in a feedback loop, with one labelled exit to done">
+          <defs>
+            <marker id="arH-rc" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0033a0"/></marker>
+            <marker id="arR-rc" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#5b6675"/></marker>
+          </defs>
+          <rect class="node" x="40" y="44" width="120" height="48" rx="8"/><text class="nlabel" x="100" y="68">draft</text>
+          <rect class="node critic" x="300" y="44" width="120" height="48" rx="8"/><text class="nlabel" x="360" y="68">critic</text>
+          <rect class="node" x="490" y="44" width="110" height="48" rx="8"/><text class="nlabel" x="545" y="68">done</text>
+          <line class="send" x1="160" y1="68" x2="292" y2="68" marker-end="url(#arH-rc)"/>
+          <text class="lbl" x="226" y="58">draft</text>
+          <path class="ret" d="M360,92 C 320,158 140,158 100,92" marker-end="url(#arR-rc)"/>
+          <text class="lbl" x="230" y="152">feedback</text>
+          <line class="send" x1="420" y1="68" x2="482" y2="68" marker-end="url(#arH-rc)"/>
+          <text class="lbl" x="455" y="58">meets criteria</text>
+        </svg>
+        <figcaption>Drafter and critic are separate minds in a feedback loop, with exactly one named
+        way out.</figcaption>
+      </figure>
+      <div class="plist pro"><h4>Pros</h4><ul>
+        <li>Catches errors a single pass misses: the second mind is there precisely to find what the drafter cannot see in its own work.</li>
+        <li>Cheap as subagents: two-plus in-turn calls, a drafter plus a fit-for-purpose critic (a refuter for 'could this be wrong', a fact-checker for 'is it true', a verifier for 'does it meet the stated criteria').</li>
+        <li>Iterative refinement that measurably improves the output when the criteria are clear.</li>
+      </ul></div>
+      <div class="plist con"><h4>Cons</h4><ul>
+        <li>Needs a nameable exit and an iteration cap set before you start: 'until it is good' runs forever.</li>
+        <li>Only works if the critic is genuinely separate and blind to the draft's making: if the drafter grades itself, it is a single pass pretending to be a loop.</li>
+        <li>As standing agents each loop is two wakes and the draft travels by message, which is rarely warranted.</li>
+      </ul></div>
+      <div class="plist use"><h4>Use cases</h4><ul>
+        <li>Draft an argument, have a refuter subagent try to knock it down, revise, and stop when no new objection lands.</li>
+        <li>Write a claim-heavy summary, run a fact-check pass over it, then fix what fails.</li>
+        <li>Produce an artefact against a checklist, and have a verifier subagent confirm each criterion before it ships.</li>
+      </ul></div>
+    </article>
+
+    <article class="card">
+      <p class="fmt-name">Consensus / debate</p>
+      <p class="also">Also called parallelisation (voting).</p>
+      <p class="whatis">Ask the same question several independent ways and then tally or weigh the
+      answers, so a noisy or high-stakes judgement does not rest on a single attempt. Voting is
+      independent one-shot attempts you count; debate adds argument across rounds.</p>
+      <figure class="diagram">
+        <svg width="540" height="262" viewBox="0 0 560 262" role="img" aria-label="One question fanning by solid arrows to three identical runs that return by dashed arrows into a tally, with cross-run debate flagged as a costly extra">
+          <defs>
+            <marker id="arH-con" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0033a0"/></marker>
+            <marker id="arR-con" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L7,3.5 L0,7 Z" fill="#5b6675"/></marker>
+            <marker id="arF-con" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0,0 L6,3 L0,6 Z" fill="#5b6675"/></marker>
+          </defs>
+          <rect class="node" x="205" y="12" width="150" height="46" rx="8"/><text class="nlabel" x="280" y="35">question</text>
+          <rect class="node" x="40" y="112" width="96" height="46" rx="8"/><text class="nlabel" x="88" y="135">run</text>
+          <rect class="node" x="232" y="112" width="96" height="46" rx="8"/><text class="nlabel" x="280" y="135">run</text>
+          <rect class="node" x="424" y="112" width="96" height="46" rx="8"/><text class="nlabel" x="472" y="135">run</text>
+          <rect class="node" x="210" y="206" width="140" height="46" rx="8"/><text class="nlabel" x="280" y="229">tally</text>
+          <line class="send" x1="280" y1="58" x2="96" y2="110" marker-end="url(#arH-con)"/>
+          <line class="send" x1="280" y1="58" x2="280" y2="110" marker-end="url(#arH-con)"/>
+          <line class="send" x1="280" y1="58" x2="464" y2="110" marker-end="url(#arH-con)"/>
+          <line class="ret" x1="88" y1="158" x2="238" y2="204" marker-end="url(#arR-con)"/>
+          <line class="ret" x1="280" y1="158" x2="280" y2="204" marker-end="url(#arR-con)"/>
+          <line class="ret" x1="472" y1="158" x2="322" y2="204" marker-end="url(#arR-con)"/>
+          <line class="faint" x1="140" y1="135" x2="228" y2="135" marker-start="url(#arF-con)" marker-end="url(#arF-con)"/>
+          <line class="faint" x1="332" y1="135" x2="420" y2="135" marker-start="url(#arF-con)" marker-end="url(#arF-con)"/>
+          <text class="lbl" x="280" y="182">debate only: a wake per round, standing agents</text>
+        </svg>
+        <figcaption>Identical parallel attempts feed a tally; mid-run debate is the costly add-on, not
+        free.</figcaption>
+      </figure>
+      <div class="plist pro"><h4>Pros</h4><ul>
+        <li>Raises confidence on noisy or high-stakes judgements: several independent attempts beat one.</li>
+        <li>Cheap as a subagent vote: N runs of one prompt in a single turn, then you tally.</li>
+        <li>Diversity of approach surfaces answers a single run would miss.</li>
+      </ul></div>
+      <div class="plist con"><h4>Cons</h4><ul>
+        <li>Waste on anything with one deterministic answer: you pay N times for a result you would get once.</li>
+        <li>Subagents cannot talk mid-run (they return once), so a subagent 'debate' is really just one round of independent votes.</li>
+        <li>True back-and-forth needs standing agents: a wake per utterance per side, no shared transcript, replies landing in finish order not send order, any message holdable for approval.</li>
+        <li>There is no voting or quorum primitive: the chief tallies by hand, with no signal separating a crashed voter from a thinking one.</li>
+      </ul></div>
+      <div class="plist use"><h4>Use cases</h4><ul>
+        <li>Ask three independent runs to rate a risky decision, then go with the majority.</li>
+        <li>Generate several candidate answers to a fuzzy question and pick the best-supported one.</li>
+        <li>Sanity-check a judgement call by seeing whether independent attempts agree.</li>
+      </ul></div>
+    </article>
+
+  </div>
+
+  <footer class="pagefoot">NanoClaw · multi-agent patterns</footer>
+
+</main>
+</body>
+</html>
